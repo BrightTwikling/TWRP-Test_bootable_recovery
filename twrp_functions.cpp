@@ -760,7 +760,7 @@ bool TWFunc::TryDecryptingBackup(std::string restore_path, const std::string& pa
 }
 
 std::string TWFunc::GetCurrentDate() {
-  constexpr auto seconds = std::time_t{};
+  const time_t seconds = time(nullptr);
   std::tm local{};
   localtime_r(&seconds, &local);  // thread-safe, unlike localtime()
   return std::format("{:04d}-{:02d}-{:02d}--{:02d}-{:02d}-{:02d}", local.tm_year + 1900,
