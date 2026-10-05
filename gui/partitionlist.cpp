@@ -97,10 +97,10 @@ int GUIPartitionList::Update(void)
 	// Check for changes in mount points if the list type is mount and update the list and render if needed
 	if (ListType == "mount") {
 		for (PartitionList& partition : mList) {
-			if (PartitionManager.Is_Mounted_By_Path(partition.Mount_Point) && !partition.selected) {
+			if (PartitionManager.IsMountedByPath(partition.mount_point) && !partition.selected) {
 				partition.selected = true;
 				mUpdate = 1;
-			} else if (!PartitionManager.Is_Mounted_By_Path(partition.Mount_Point) && partition.selected) {
+			} else if (!PartitionManager.IsMountedByPath(partition.mount_point) && partition.selected) {
 				partition.selected = false;
 				mUpdate = 1;
 			}
@@ -114,7 +114,7 @@ int GUIPartitionList::Update(void)
 		// restore as the list for restore will change depending on what
 		// partitions were backed up
 		mList.clear();
-		PartitionManager.Get_Partition_List(ListType, &mList);
+		PartitionManager.GetPartitionList(ListType, &mList);
 		SetVisibleListLocation(0);
 		updateList = false;
 		mUpdate = 1;
@@ -182,11 +182,11 @@ void GUIPartitionList::MatchList(void) {
 
 	std::vector<std::string> selected_paths = android::base::Tokenize(variablelist, ";");
 	for (PartitionList& partition : mList) {
-		auto it = std::find(selected_paths.begin(), selected_paths.end(), partition.Mount_Point);
+		auto it = std::find(selected_paths.begin(), selected_paths.end(), partition.mount_point);
 		partition.selected = it != selected_paths.end();
 		if (partition.selected) {
-			TWPartition* t_part = PartitionManager.Find_Partition_By_Path(partition.Mount_Point);
-			DataManager::SetValue("tw_is_slot_part", t_part != nullptr ? (int) t_part->SlotSelect : 0);
+			TWPartition* t_part = PartitionManager.FindPartitionByPath(partition.mount_point);
+			DataManager::SetValue("tw_is_slot_part", t_part != nullptr ? (int) t_part->slot_select_ : 0);
 		}
 	}
 }
@@ -196,7 +196,7 @@ void GUIPartitionList::SetPosition() {
 
 	SetVisibleListLocation(0);
 	for (int i = 0; i < listSize; i++) {
-		if (mList[i].Mount_Point == currentValue) {
+		if (mList[i].mount_point == currentValue) {
 			mList[i].selected = true;
 			SetVisibleListLocation(i);
 		} else {
@@ -215,7 +215,7 @@ void GUIPartitionList::RenderItem(size_t itemindex, int yPos, bool selected)
 	// note: the "selected" parameter above is for the currently touched item
 	// don't confuse it with the more persistent "selected" flag per list item used below
 	ImageResource* icon = mList[itemindex].selected ? mIconSelected : mIconUnselected;
-	const std::string& text = mList[itemindex].Display_Name;
+	const std::string& text = mList[itemindex].display_name;
 
 	RenderStdItem(yPos, selected, icon, text.c_str());
 }
@@ -226,39 +226,39 @@ void GUIPartitionList::NotifySelect(size_t item_selected)
 		PartitionList& selected_partition = mList[item_selected];
 		if (ListType == "mount") {
 			if (!selected_partition.selected) {
-				if (PartitionManager.Mount_By_Path(selected_partition.Mount_Point, true)) {
+				if (PartitionManager.MountByPath(selected_partition.mount_point, true)) {
 					selected_partition.selected = true;
-					PartitionManager.Add_MTP_Storage(selected_partition.Mount_Point);
+					PartitionManager.AddMtpStorage(selected_partition.mount_point);
 					mUpdate = 1;
 				}
 			} else {
-				if (PartitionManager.UnMount_By_Path(selected_partition.Mount_Point, true)) {
+				if (PartitionManager.UnmountByPath(selected_partition.mount_point, true)) {
 					selected_partition.selected = false;
 					mUpdate = 1;
 				}
 			}
 		} else if (!mVariable.empty()) {
 			if (ListType == "storage") {
-				TWPartition* Part = PartitionManager.Find_Partition_By_Path(selected_partition.Mount_Point);
-				if (Part == nullptr) {
-					LOGERR("Unable to locate partition for '%s'\n", selected_partition.Mount_Point.c_str());
+				TWPartition* part = PartitionManager.FindPartitionByPath(selected_partition.mount_point);
+				if (part == nullptr) {
+					LOGERR("Unable to locate partition for '%s'\n", selected_partition.mount_point.c_str());
 					return;
 				}
-				bool update_size = !Part->Is_Mounted() && Part->Removable;
-				if (!Part->Mount(true))
+				bool update_size = !part->IsMounted() && part->removable_;
+				if (!part->Mount(true))
 					return;
-				if (update_size && !Part->Update_Size(true))
+				if (update_size && !part->UpdateSize(true))
 					return;
 
 				for (PartitionList& partition : mList)
 					partition.selected = false;
 
 				if (update_size) {
-					selected_partition.Display_Name = std::format("{} ({})", Part->Storage_Name, UnitConversion::FormatBytes(Part->Free));
+					selected_partition.display_name = std::format("{} ({})", part->storage_name_, UnitConversion::FormatBytes(part->free_));
 				}
 				selected_partition.selected = true;
 				mUpdate = 1;
-				DataManager::SetValue(mVariable, selected_partition.Mount_Point);
+				DataManager::SetValue(mVariable, selected_partition.mount_point);
 			} else {
 				if (ListType == "flashimg") { // only one item can be selected for flashing images
 					for (PartitionList& partition : mList)
@@ -266,14 +266,14 @@ void GUIPartitionList::NotifySelect(size_t item_selected)
 				}
 				selected_partition.selected = !selected_partition.selected;
 				if (selected_partition.selected) {
-					TWPartition* t_part = PartitionManager.Find_Partition_By_Path(selected_partition.Mount_Point);
-					DataManager::SetValue("tw_is_slot_part", t_part != nullptr ? (int) t_part->SlotSelect : 0);
+					TWPartition* t_part = PartitionManager.FindPartitionByPath(selected_partition.mount_point);
+					DataManager::SetValue("tw_is_slot_part", t_part != nullptr ? (int) t_part->slot_select_ : 0);
 				}
 
 				std::string variablelist;
 				for (const PartitionList& partition : mList) {
 					if (partition.selected)
-						variablelist += partition.Mount_Point + ";";
+						variablelist += partition.mount_point + ";";
 				}
 
 				mUpdate = 1;

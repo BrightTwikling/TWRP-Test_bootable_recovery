@@ -23,6 +23,6 @@
 // TARGET_RECOVERY_TWRP_LIB to allow device-specific pre and post
 // wipe encryption calls.
 
-BasePartition* make_partition() {
+BasePartition* MakePartition() {
   return new BasePartition();
 }

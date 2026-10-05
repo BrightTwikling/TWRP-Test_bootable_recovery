@@ -81,18 +81,18 @@ GUIListBox::GUIListBox(rapidxml::xml_node<>* node) : GUIScrollList(node)
 				mListItems.push_back(data);
 			}
 		} else if (mVariable == "tw_crypto_user_id") {
-			std::vector<users_struct>::iterator iter;
-			std::vector<users_struct>* Users_List = PartitionManager.Get_Users_List();
-			for (iter = Users_List->begin(); iter != Users_List->end(); iter++) {
-				if (!(*iter).isDecrypted) {
+			std::vector<UsersStruct>::iterator iter;
+			std::vector<UsersStruct>* users_list_ = PartitionManager.GetUsersList();
+			for (iter = users_list_->begin(); iter != users_list_->end(); iter++) {
+				if (!(*iter).is_decrypted) {
 					ListItem data;
-					data.displayName = (*iter).userName;
-					data.variableValue = (*iter).userId;
+					data.displayName = (*iter).user_name;
+					data.variableValue = std::to_string((*iter).user_id);
 					data.action = NULL;
 					DataManager::GetValue("tw_crypto_user_id", currentValue);
-					if (currentValue == (*iter).userId || currentValue == "") {
+					if (currentValue == std::to_string((*iter).user_id) || currentValue == "") {
 						data.selected = 1;
-						DataManager::SetValue("tw_crypto_user_id", (*iter).userId);
+						DataManager::SetValue("tw_crypto_user_id", std::to_string((*iter).user_id));
 						DataManager::SetValue("tw_crypto_pwtype", (*iter).type);
 					} else
 						data.selected = 0;
@@ -153,18 +153,18 @@ int GUIListBox::Update(void)
 
 	if (mVariable == "tw_crypto_user_id") {
 		mListItems.clear();
-		std::vector<users_struct>::iterator iter;
-		std::vector<users_struct>* Users_List = PartitionManager.Get_Users_List();
-		for (iter = Users_List->begin(); iter != Users_List->end(); iter++) {
-			if (!(*iter).isDecrypted) {
+		std::vector<UsersStruct>::iterator iter;
+		std::vector<UsersStruct>* users_list_ = PartitionManager.GetUsersList();
+		for (iter = users_list_->begin(); iter != users_list_->end(); iter++) {
+			if (!(*iter).is_decrypted) {
 				ListItem data;
-				data.displayName = (*iter).userName;
-				data.variableValue = (*iter).userId;
+				data.displayName = (*iter).user_name;
+				data.variableValue = std::to_string((*iter).user_id);
 				data.action = NULL;
 				DataManager::GetValue("tw_crypto_user_id", currentValue);
-				if (currentValue == (*iter).userId || currentValue == "") {
+				if (currentValue == std::to_string((*iter).user_id) || currentValue == "") {
 					data.selected = 1;
-					DataManager::SetValue("tw_crypto_user_id", (*iter).userId);
+					DataManager::SetValue("tw_crypto_user_id", std::to_string((*iter).user_id));
 					DataManager::SetValue("tw_crypto_pwtype", (*iter).type);
 				} else
 				data.selected = 0;

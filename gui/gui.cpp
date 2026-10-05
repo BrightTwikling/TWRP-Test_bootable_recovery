@@ -707,7 +707,7 @@ static int runPages(const char *page_name, const int stop_on_page_done)
 	for (;;)
 	{
 		// Apply completed background size scans on the GUI thread.
-		PartitionManager.Process_Async_Data_Size();
+		PartitionManager.ProcessAsyncDataSize();
 		perf_manager.Update();
 		input_timeout_ms = perf_manager.ClampTimeoutMs(input_timeout_ms);
 		const bool collect_stats = gui_stats_enabled();
@@ -740,7 +740,7 @@ static int runPages(const char *page_name, const int stop_on_page_done)
 			if (g_pty_fd > 0 && FD_ISSET(g_pty_fd, &fdset))
 				terminal_pty_read();
 			if (PartitionManager.uevent_pfd.fd > 0 && FD_ISSET(PartitionManager.uevent_pfd.fd, &fdset))
-				PartitionManager.read_uevent();
+				PartitionManager.ReadUevent();
 			if (ors_read_fd > 0 && !orsout && FD_ISSET(ors_read_fd, &fdset))
 				ors_command_read();
 		}
@@ -969,16 +969,16 @@ int gui_loadResources(void)
 		std::string theme_path;
 
 		theme_path = DataManager::GetCurrentStoragePath();
-		if (!PartitionManager.Mount_Settings_Storage(false))
+		if (!PartitionManager.MountSettingsStorage(false))
 		{
 			int retry_count = 5;
-			while (retry_count > 0 && !PartitionManager.Mount_Settings_Storage(false))
+			while (retry_count > 0 && !PartitionManager.MountSettingsStorage(false))
 			{
 				usleep(500000);
 				retry_count--;
 			}
 
-			if (!PartitionManager.Mount_Settings_Storage(true))
+			if (!PartitionManager.MountSettingsStorage(true))
 			{
 				LOGINFO("Unable to mount %s during GUI startup.\n", theme_path.c_str());
 				check = 1;
@@ -1009,7 +1009,7 @@ error:
 
 int gui_loadCustomResources(void)
 {
-	if (!PartitionManager.Mount_Settings_Storage(false)) {
+	if (!PartitionManager.MountSettingsStorage(false)) {
 		LOGINFO("Unable to mount settings storage during GUI startup.\n");
 		return -1;
 	}

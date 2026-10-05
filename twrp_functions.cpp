@@ -247,10 +247,9 @@ void TWFunc::AesDecryptStream(const std::string& password) {
   Oaes::DecryptStream(password);
 }
 
-unsigned long TWFunc::GetFileSize(const std::string& path) {
+uint64_t TWFunc::GetFileSize(const std::string& path) {
   std::error_code ec;
-  const auto size = fs::file_size(path, ec);
-  return ec ? 0 : static_cast<unsigned long>(size);
+  return ec ? 0 : fs::file_size(path, ec);
 }
 
 std::string TWFunc::RemoveBeginningSlash(const std::string& path) {
@@ -411,7 +410,7 @@ void TWFunc::GuiOperationText(const std::string& read_value, const std::string& 
 }
 
 void TWFunc::CopyLog(const std::string& src, const std::string& dst) {
-  PartitionManager.Mount_By_Path(dst, false);
+  PartitionManager.MountByPath(dst, false);
 
   // Recover the previous log contents: decompress the old .gz if present, otherwise read the
   // matching uncompressed file and remove it (it gets folded into the new .gz).
@@ -472,7 +471,7 @@ void TWFunc::UpdateLogFile() {
   const fs::path recovery_dir = log_dir / "recovery";
 
   if (log_dir == CACHE_LOGS_DIR) {
-    if (!PartitionManager.Mount_By_Path(CACHE_LOGS_DIR, false)) {
+    if (!PartitionManager.MountByPath(CACHE_LOGS_DIR, false)) {
       LOGINFO("Failed to mount %s for TWFunc::UpdateLogFile\n", CACHE_LOGS_DIR);
     }
   }
@@ -493,7 +492,7 @@ void TWFunc::UpdateLogFile() {
   chmod(last_log_copy.c_str(), 0640);
 
   if (log_dir == CACHE_LOGS_DIR) {
-    if (PartitionManager.Mount_By_Path("/cache", false)) {
+    if (PartitionManager.MountByPath("/cache", false)) {
       if (unlink("/cache/recovery/command") && errno != ENOENT) {
         LOGINFO("Can't unlink %s\n", "/cache/recovery/command");
       }
@@ -510,11 +509,11 @@ void TWFunc::ClearBootloaderMessage() {
 }
 
 void TWFunc::UpdateIntentFile(const std::string& intent) {
-  if (PartitionManager.Mount_By_Path("/cache", false) && !intent.empty()) {
+  if (PartitionManager.MountByPath("/cache", false) && !intent.empty()) {
     WriteToFile("/cache/recovery/intent", intent);
   }
 #if defined(TW_CACHE_INTENT_COLOROS) || AB_OTA_UPDATER
-  if (PartitionManager.Mount_By_Path(DATA_LOGS_DIR, false) && !intent.empty()) {
+  if (PartitionManager.MountByPath(DATA_LOGS_DIR, false) && !intent.empty()) {
     WriteToFile("/data/cache/recovery/intent", intent);
   }
 #endif
@@ -544,9 +543,9 @@ int TWFunc::TwReboot(const RebootCommand command) {
   // Always force a sync before we reboot
   sync();
 
-  if (TWPartition* data_part = PartitionManager.Find_Partition_By_Path("/data")) {
-    if (data_part->Is_Mounted()) {
-      data_part->UnMount(false);
+  if (TWPartition* data_part = PartitionManager.FindPartitionByPath("/data")) {
+    if (data_part->IsMounted()) {
+      data_part->Unmount(false);
     }
   }
 
@@ -628,8 +627,8 @@ int TWFunc::RemoveDir(const std::string& path, const bool skip_parent) {
 
 int TWFunc::CopyFile(const std::string& src, const std::string& dst, int mode, bool mount_paths) {
   if (mount_paths) {
-    PartitionManager.Mount_By_Path(src, false);
-    PartitionManager.Mount_By_Path(dst, false);
+    PartitionManager.MountByPath(src, false);
+    PartitionManager.MountByPath(dst, false);
   }
   if (!IsPathExists(src)) {
     LOGINFO("Path %s does not exist. Unable to copy file to %s\n", src.c_str(), dst.c_str());
@@ -768,19 +767,19 @@ std::string TWFunc::GetCurrentDate() {
 }
 
 std::string TWFunc::GetPropertyFromSystem(const std::string& key) {
-  return GetPropertyFromPartition(key, PartitionManager, PartitionManager.Get_Android_Root_Path());
+  return GetPropertyFromPartition(key, PartitionManager, TWPartitionManager::GetAndroidRootPath());
 }
 
 std::string TWFunc::GetPropertyFromPartition(const std::string& prop_name,
                                              TWPartitionManager& partition_manager,
                                              const fs::path& mount_point,
                                              const std::string& prop_file_name) {
-  const bool was_mounted = partition_manager.Is_Mounted_By_Path(mount_point);
-  if (!partition_manager.Mount_By_Path(mount_point, true)) {
+  const bool was_mounted = partition_manager.IsMountedByPath(mount_point);
+  if (!partition_manager.MountByPath(mount_point, true)) {
     return {};
   }
 
-  const std::string prop_file = mount_point == partition_manager.Get_Android_Root_Path()
+  const std::string prop_file = mount_point == partition_manager.GetAndroidRootPath()
                                   ? mount_point / "system" / prop_file_name
                                   : mount_point / prop_file_name;
 
@@ -804,7 +803,7 @@ std::string TWFunc::GetPropertyFromPartition(const std::string& prop_name,
   }
 
   if (!was_mounted) {
-    partition_manager.UnMount_By_Path(mount_point, false);
+    partition_manager.UnmountByPath(mount_point, false);
   }
   return prop_value;
 }
@@ -829,7 +828,7 @@ void TWFunc::AutoGenerateBackupName() {
     space_check = backup_name.substr(backup_name.size() - 1, 1);
   }
   std::ranges::replace(backup_name, ' ', '_');
-  if (PartitionManager.Check_Backup_Name(backup_name, false, true) != 0) {
+  if (!TWPartitionManager::IsBackupNameValid(backup_name, false, true)) {
     LOGINFO("Auto generated backup name '%s' is not valid, using date instead.\n",
             backup_name.c_str());
     DataManager::SetValue(TW_BACKUP_NAME, GetCurrentDate());
@@ -882,7 +881,7 @@ void TWFunc::FixupTimeOnBoot(const std::string& time_paths /* = "" */) {
   std::vector<std::string> paths; // space separated list of paths
   if (time_paths.empty()) {
     paths = {"/data/system/time/", "/data/time/", "/data/vendor/time/"};
-    if (!PartitionManager.Mount_By_Path("/data", false)) return;
+    if (!PartitionManager.MountByPath("/data", false)) return;
   } else {
     // When specific path(s) are used, FixupTimeOnBoot needs those
     // partitions to already be mounted!
@@ -1006,10 +1005,10 @@ bool TWFunc::ToggleMtp(bool enable) {
   static bool was_enabled = false;
 
   if (enable && was_enabled) {
-    if (!PartitionManager.Enable_MTP()) PartitionManager.Disable_MTP();
+    if (!PartitionManager.EnableMtp()) PartitionManager.DisableMtp();
   } else {
     was_enabled = DataManager::GetIntValue("tw_mtp_enabled");
-    PartitionManager.Disable_MTP();
+    PartitionManager.DisableMtp();
     usleep(500);
   }
   return was_enabled;
@@ -1025,7 +1024,7 @@ void TWFunc::SetPerformanceMode(const bool mode) {
 }
 
 void TWFunc::DisableStockRecoveryReplace() {
-  if (PartitionManager.Mount_By_Path(PartitionManager.Get_Android_Root_Path(), false)) {
+  if (PartitionManager.MountByPath(PartitionManager.GetAndroidRootPath(), false)) {
     // Disable flashing of stock recovery
     if (IsPathExists("/system/recovery-from-boot.p")) {
       rename("/system/recovery-from-boot.p", "/system/recovery-from-boot.bak");
@@ -1033,7 +1032,7 @@ void TWFunc::DisableStockRecoveryReplace() {
           "rename_stock=Renamed stock recovery file in /system to prevent the stock ROM from replacing TWRP.");
       sync();
     }
-    PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), false);
+    PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), false);
   }
 }
 
@@ -1092,8 +1091,8 @@ bool TWFunc::IsNumber(const std::string& str_to_check) {
 }
 
 std::string TWFunc::GetLogDir() {
-  if (!PartitionManager.Find_Partition_By_Path(CACHE_LOGS_DIR)) {
-    if (!PartitionManager.Find_Partition_By_Path(DATA_LOGS_DIR)) {
+  if (!PartitionManager.FindPartitionByPath(CACHE_LOGS_DIR)) {
+    if (!PartitionManager.FindPartitionByPath(DATA_LOGS_DIR)) {
       LOGINFO("Unable to find a directory to store TWRP logs.");
       return "";
     }
@@ -1131,7 +1130,7 @@ void TWFunc::CheckSelinuxSupport() {
   // missing the check defaults to reporting support, like the historical code did.
   const std::string cache_dir = GetLogDir();
   if (cache_dir == CACHE_LOGS_DIR) {
-    PartitionManager.Mount_By_Path(CACHE_LOGS_DIR, false);
+    PartitionManager.MountByPath(CACHE_LOGS_DIR, false);
   }
   const std::string se_context_check = cache_dir + "recovery/";
   char* contexts = nullptr;
@@ -1154,7 +1153,7 @@ int TWFunc::OverrideProperty(const std::string& key, const std::string& value) {
 #ifdef TW_INCLUDE_LIBRESETPROP
   return setprop(key.c_str(), value.c_str(), false);
 #else
-  return NOT_AVAILABLE;
+  return kNotAvailable;
 #endif
 }
 
@@ -1162,7 +1161,7 @@ int TWFunc::DeleteProperty(const std::string& key) {
 #ifdef TW_INCLUDE_LIBRESETPROP
   return delprop(key.c_str(), false);
 #else
-  return NOT_AVAILABLE;
+  return kNotAvailable;
 #endif
 }
 

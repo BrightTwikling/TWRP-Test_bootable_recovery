@@ -71,12 +71,12 @@ void InfoManager::Clear() {
 static bool twPersistFirstMounted = false;
 
 static void twPersistMount() {
-  twPersistFirstMounted = PartitionManager.Is_Mounted_By_Path(TW_PERSIST_DIR);
-  if (!twPersistFirstMounted) PartitionManager.Mount_By_Path(TW_PERSIST_DIR, false);
+  twPersistFirstMounted = PartitionManager.IsMountedByPath(TW_PERSIST_DIR);
+  if (!twPersistFirstMounted) PartitionManager.MountByPath(TW_PERSIST_DIR, false);
 }
 
 static void twPersistUnMount() {
-  if (!twPersistFirstMounted) PartitionManager.UnMount_By_Path(TW_PERSIST_DIR, false);
+  // if (!twPersistFirstMounted) PartitionManager.UnmountByPath(TW_PERSIST_DIR, false);
 }
 
 int InfoManager::LoadValues() {

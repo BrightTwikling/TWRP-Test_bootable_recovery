@@ -64,7 +64,7 @@ std::set<std::string> GUIAction::setActionsRunningInCallerThread;
 static std::string zip_queue[10];
 static int zip_queue_index;
 pid_t sideload_child_pid;
-extern std::vector<users_struct> Users_List;
+extern std::vector<UsersStruct> users_list_;
 extern GUITerminal* term;
 
 static void *ActionThread_work_wrapper(void *data);
@@ -394,7 +394,7 @@ int GUIAction::flash_zip(std::string filename, int* wipe_cache)
 	}
 
 	if (!TWFunc::IsPathExists(filename)) {
-		if (!PartitionManager.Mount_By_Path(filename, true)) {
+		if (!PartitionManager.MountByPath(filename, true)) {
 			return -1;
 		}
 		if (!TWFunc::IsPathExists(filename)) {
@@ -412,7 +412,7 @@ int GUIAction::flash_zip(std::string filename, int* wipe_cache)
 			umount("/apex");
 		}
 		ret_val = TWinstall_zip(filename.c_str(), wipe_cache, (bool) !DataManager::GetIntValue(TW_SKIP_DIGEST_CHECK_ZIP_VAR));
-		PartitionManager.Unlock_Block_Partitions();
+		PartitionManager.UnlockBlockPartitions();
 		// Now, check if we need to ensure TWRP remains installed...
 		struct stat st;
 		if (stat("/system/bin/installTwrp", &st) == 0)
@@ -608,7 +608,7 @@ int GUIAction::readBackup(std::string arg __unused)
 	std::string Restore_Name;
 
 	DataManager::GetValue("tw_restore", Restore_Name);
-	PartitionManager.Set_Restore_Files(Restore_Name);
+	PartitionManager.SetRestoreFiles(Restore_Name);
 	return 0;
 }
 
@@ -638,12 +638,12 @@ int GUIAction::mount(std::string arg)
 	if (arg == "usb") {
 		DataManager::SetValue(TW_ACTION_BUSY, 1);
 		if (!simulate)
-			PartitionManager.usb_storage_enable();
+			PartitionManager.UsbStorageEnable();
 		else
 			gui_msg("simulating=Simulating actions...");
 	} else if (!simulate) {
-		PartitionManager.Mount_By_Path(arg, true);
-		PartitionManager.Add_MTP_Storage(arg);
+		PartitionManager.MountByPath(arg, true);
+		PartitionManager.AddMtpStorage(arg);
 	} else
 		gui_msg("simulating=Simulating actions...");
 	return 0;
@@ -653,12 +653,12 @@ int GUIAction::unmount(std::string arg)
 {
 	if (arg == "usb") {
 		if (!simulate)
-			PartitionManager.usb_storage_disable();
+			PartitionManager.UsbStorageDisable();
 		else
 			gui_msg("simulating=Simulating actions...");
 		DataManager::SetValue(TW_ACTION_BUSY, 0);
 	} else if (!simulate) {
-		PartitionManager.UnMount_By_Path(arg, true);
+		PartitionManager.UnmountByPath(arg, true);
 	} else
 		gui_msg("simulating=Simulating actions...");
 	return 0;
@@ -671,8 +671,8 @@ int GUIAction::restoredefaultsettings(std::string arg __unused)
 		gui_msg("simulating=Simulating actions...");
 	else {
 		DataManager::ResetDefaults();
-		PartitionManager.Update_System_Details();
-		PartitionManager.Mount_Current_Storage(true);
+		PartitionManager.UpdateSystemDetails();
+		PartitionManager.MountCurrentStorage(true);
 	}
 	operation_end(0);
 	return 0;
@@ -689,7 +689,7 @@ int GUIAction::copylog(std::string arg __unused)
 
 		DataManager::GetValue("tw_include_kernel_log", copy_kernel_log);
 		DataManager::GetValue("tw_include_logcat", copy_logcat);
-		PartitionManager.Mount_Current_Storage(true);
+		PartitionManager.MountCurrentStorage(true);
 		curr_storage = DataManager::GetCurrentStoragePath();
 		dst = curr_storage + "/recovery.log";
 		TWFunc::CopyFile("/tmp/recovery.log", dst.c_str(), 0755);
@@ -854,12 +854,12 @@ int GUIAction::sleepcounter(std::string arg)
 int GUIAction::appenddatetobackupname(std::string arg __unused)
 {
 	operation_start("AppendDateToBackupName");
-	std::string Backup_Name;
-	DataManager::GetValue(TW_BACKUP_NAME, Backup_Name);
-	Backup_Name += TWFunc::GetCurrentDate();
-	if (Backup_Name.size() > MAX_BACKUP_NAME_LEN)
-		Backup_Name.resize(MAX_BACKUP_NAME_LEN);
-	DataManager::SetValue(TW_BACKUP_NAME, Backup_Name);
+	std::string backup_name;
+	DataManager::GetValue(TW_BACKUP_NAME, backup_name);
+	backup_name += TWFunc::GetCurrentDate();
+	if (backup_name.size() > MAX_BACKUP_NAME_LEN)
+		backup_name.resize(MAX_BACKUP_NAME_LEN);
+	DataManager::SetValue(TW_BACKUP_NAME, backup_name);
 	PageManager::NotifyKey(KEY_END, true);
 	PageManager::NotifyKey(KEY_END, false);
 	operation_end(0);
@@ -927,23 +927,23 @@ int GUIAction::getpartitiondetails(std::string arg)
 			end_pos = List.find(";", start_pos);
 		}
 		if (!part_path.empty()) {
-			TWPartition* Part = PartitionManager.Find_Partition_By_Path(part_path);
-			if (Part) {
-				DataManager::SetValue("tw_partition_name", Part->Display_Name);
-				DataManager::SetValue("tw_partition_mount_point", Part->Mount_Point);
-				DataManager::SetValue("tw_partition_file_system", Part->Current_File_System);
-				DataManager::SetValue("tw_partition_size", UnitConversion::FormatBytes(Part->Size));
-				DataManager::SetValue("tw_partition_used", UnitConversion::FormatBytes(Part->Used));
-				DataManager::SetValue("tw_partition_free", UnitConversion::FormatBytes(Part->Free));
-				DataManager::SetValue("tw_partition_backup_size", UnitConversion::FormatBytes(Part->Backup_Size));
-				DataManager::SetValue("tw_partition_removable", Part->Removable);
-				DataManager::SetValue("tw_partition_is_present", Part->Is_Present);
+			TWPartition* part = PartitionManager.FindPartitionByPath(part_path);
+			if (part) {
+				DataManager::SetValue("tw_partition_name", part->display_name_);
+				DataManager::SetValue("tw_partition_mount_point", part->mount_point_);
+				DataManager::SetValue("tw_partition_file_system", part->current_file_system_);
+				DataManager::SetValue("tw_partition_size", UnitConversion::FormatBytes(part->size_));
+				DataManager::SetValue("tw_partition_used", UnitConversion::FormatBytes(part->used_));
+				DataManager::SetValue("tw_partition_free", UnitConversion::FormatBytes(part->free_));
+				DataManager::SetValue("tw_partition_backup_size", UnitConversion::FormatBytes(part->backup_size_));
+				DataManager::SetValue("tw_partition_removable", part->removable_);
+				DataManager::SetValue("tw_partition_is_present", part->is_present_);
 
-				if (Part->Can_Repair())
+				if (part->CanRepair())
 					DataManager::SetValue("tw_partition_can_repair", 1);
 				else
 					DataManager::SetValue("tw_partition_can_repair", 0);
-				if (Part->Can_Resize())
+				if (part->CanResize())
 					DataManager::SetValue("tw_partition_can_resize", 1);
 				else
 					DataManager::SetValue("tw_partition_can_resize", 0);
@@ -985,7 +985,7 @@ int GUIAction::screenshot(std::string arg __unused)
 	gid_t gid = AID_MEDIA_RW;
 
 	const std::string storage = DataManager::GetCurrentStoragePath();
-	if (PartitionManager.Is_Mounted_By_Path(storage)) {
+	if (PartitionManager.IsMountedByPath(storage)) {
 		snprintf(path, sizeof(path), "%s/Pictures/Screenshots/", storage.c_str());
 	} else {
 		strcpy(path, "/tmp/");
@@ -1092,10 +1092,10 @@ int GUIAction::flash(std::string arg)
 
 	if (wipe_cache) {
 		gui_msg("zip_wipe_cache=One or more zip requested a cache wipe -- Wiping cache now.");
-		PartitionManager.Wipe_By_Path("/cache");
+		PartitionManager.WipeByPath("/cache");
 	}
 
-	PartitionManager.Update_System_Details();
+	PartitionManager.UpdateSystemDetails();
 	operation_end(ret_val);
 	// This needs to be after the operation_end call so we change pages before we change variables that we display on the screen
 	DataManager::SetValue(TW_ZIP_QUEUE_COUNT, zip_queue_index);
@@ -1112,31 +1112,31 @@ int GUIAction::wipe(std::string arg)
 		simulate_progress_bar();
 	} else {
 		if (arg == "data")
-			ret_val = PartitionManager.Factory_Reset();
+			ret_val = PartitionManager.FactoryReset();
 		else if (arg == "battery")
-			ret_val = PartitionManager.Wipe_Battery_Stats();
+			ret_val = PartitionManager.WipeBatteryStats();
 		else if (arg == "rotate")
-			ret_val = PartitionManager.Wipe_Rotate_Data();
+			ret_val = PartitionManager.WipeRotateData();
 		else if (arg == "dalvik")
-			ret_val = PartitionManager.Wipe_Dalvik_Cache();
+			ret_val = PartitionManager.WipeDalvikCache();
 		else if (arg == "DATAMEDIA") {
-			ret_val = PartitionManager.Format_Data();
+			ret_val = PartitionManager.FormatData();
 		} else if (arg == "INTERNAL") {
 			int has_datamedia;
 
 			DataManager::GetValue(TW_HAS_DATA_MEDIA, has_datamedia);
 			if (has_datamedia) {
-				ret_val = PartitionManager.Wipe_Media_From_Data();
+				ret_val = PartitionManager.WipeMediaFromData();
 			} else {
-				ret_val = PartitionManager.Wipe_By_Path(DataManager::GetCurrentStoragePath());
+				ret_val = PartitionManager.WipeByPath(DataManager::GetCurrentStoragePath());
 			}
 		} else if (arg == "EXTERNAL") {
 			std::string External_Path;
 
 			DataManager::GetValue(TW_EXTERNAL_PATH, External_Path);
-			ret_val = PartitionManager.Wipe_By_Path(External_Path);
+			ret_val = PartitionManager.WipeByPath(External_Path);
 		} else if (arg == "ANDROIDSECURE") {
-			ret_val = PartitionManager.Wipe_Android_Secure();
+			ret_val = PartitionManager.WipeAndroidSecure();
 		} else if (arg == "LIST") {
 			std::string Wipe_List, wipe_path;
 			bool skip = false;
@@ -1150,7 +1150,7 @@ int GUIAction::wipe(std::string arg)
 					wipe_path = Wipe_List.substr(start_pos, end_pos - start_pos);
 					LOGINFO("wipe_path '%s'\n", wipe_path.c_str());
 					if (wipe_path == "/and-sec") {
-						if (!PartitionManager.Wipe_Android_Secure()) {
+						if (!PartitionManager.WipeAndroidSecure()) {
 							gui_msg("and_sec_wipe_err=Unable to wipe android secure");
 							ret_val = false;
 							break;
@@ -1158,7 +1158,7 @@ int GUIAction::wipe(std::string arg)
 							skip = true;
 						}
 					} else if (wipe_path == "DALVIK") {
-						if (!PartitionManager.Wipe_Dalvik_Cache()) {
+						if (!PartitionManager.WipeDalvikCache()) {
 							gui_err("dalvik_wipe_err=Failed to wipe dalvik");
 							ret_val = false;
 							break;
@@ -1166,7 +1166,7 @@ int GUIAction::wipe(std::string arg)
 							skip = true;
 						}
 					} else if (wipe_path == "INTERNAL") {
-						if (!PartitionManager.Wipe_Media_From_Data()) {
+						if (!PartitionManager.WipeMediaFromData()) {
 							ret_val = false;
 							break;
 						} else {
@@ -1174,7 +1174,7 @@ int GUIAction::wipe(std::string arg)
 						}
 					}
 					if (!skip) {
-						if (!PartitionManager.Wipe_By_Path(wipe_path)) {
+						if (!PartitionManager.WipeByPath(wipe_path)) {
 							gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(wipe_path));
 							ret_val = false;
 							break;
@@ -1189,9 +1189,9 @@ int GUIAction::wipe(std::string arg)
 				}
 			}
 		} else
-			ret_val = PartitionManager.Wipe_By_Path(arg);
+			ret_val = PartitionManager.WipeByPath(arg);
 	}
-	PartitionManager.Update_System_Details();
+	PartitionManager.UpdateSystemDetails();
 	if (ret_val)
 		ret_val = 0; // 0 is success
 	else
@@ -1206,7 +1206,7 @@ int GUIAction::refreshsizes(std::string arg __unused)
 	if (simulate) {
 		simulate_progress_bar();
 	} else
-		PartitionManager.Update_System_Details();
+		PartitionManager.UpdateSystemDetails();
 	operation_end(0);
 	return 0;
 }
@@ -1223,11 +1223,11 @@ int GUIAction::nandroid(std::string arg)
 		int ret = 0;
 
 		if (arg == "backup") {
-			std::string Backup_Name;
-			DataManager::GetValue(TW_BACKUP_NAME, Backup_Name);
+			std::string backup_name;
+			DataManager::GetValue(TW_BACKUP_NAME, backup_name);
 			std::string auto_gen = gui_lookup("auto_generate", "(Auto Generate)");
-			if (Backup_Name == auto_gen || Backup_Name == gui_lookup("curr_date", "(Current Date)") || Backup_Name == "0" || Backup_Name == "(" || PartitionManager.Check_Backup_Name(Backup_Name, true, true) == 0) {
-				ret = PartitionManager.Run_Backup();
+			if (backup_name == auto_gen || backup_name == gui_lookup("curr_date", "(Current Date)") || backup_name == "0" || backup_name == "(" || TWPartitionManager::IsBackupNameValid(backup_name, true, true)) {
+				ret = PartitionManager.RunBackup();
 				DataManager::SetValue("tw_encrypt_backup", 0); // reset value so we don't encrypt every subsequent backup
 				if (!PartitionManager.stop_backup) {
 					if (ret == false)
@@ -1249,7 +1249,7 @@ int GUIAction::nandroid(std::string arg)
 			std::string Restore_Name;
 
 			DataManager::GetValue("tw_restore", Restore_Name);
-			if (PartitionManager.Run_Restore(Restore_Name))
+			if (PartitionManager.RunRestore(Restore_Name))
 				ret = 0; // success
 			else
 				ret = 1; // failure
@@ -1268,7 +1268,7 @@ int GUIAction::cancelbackup(std::string arg __unused) {
 		PartitionManager.stop_backup = 1;
 	}
 	else {
-		int op_status = PartitionManager.Cancel_Backup();
+		int op_status = PartitionManager.CancelBackup();
 		if (op_status != 0)
 			op_status = 1; // failure
 	}
@@ -1285,7 +1285,7 @@ int GUIAction::fixcontexts(std::string arg __unused)
 	if (simulate) {
 		simulate_progress_bar();
 	} else {
-		op_status = PartitionManager.Fix_Contexts();
+		op_status = PartitionManager.FixContexts();
 		if (op_status != 0)
 			op_status = 1; // failure
 	}
@@ -1325,7 +1325,7 @@ int GUIAction::partitionsd(std::string arg __unused)
 		if (allow_partition == 0) {
 			gui_err("no_real_sdcard=This device does not have a real SD Card! Aborting!");
 		} else {
-			if (!PartitionManager.Partition_SDCard())
+			if (!PartitionManager.PartitionSdCard())
 				ret_val = 1; // failed
 		}
 	}
@@ -1439,11 +1439,9 @@ int GUIAction::checkbackupname(std::string arg __unused)
 	if (simulate) {
 		simulate_progress_bar();
 	} else {
-		std::string Backup_Name;
-		DataManager::GetValue(TW_BACKUP_NAME, Backup_Name);
-		op_status = PartitionManager.Check_Backup_Name(Backup_Name, true, true);
-		if (op_status != 0)
-			op_status = 1;
+		std::string backup_name;
+		DataManager::GetValue(TW_BACKUP_NAME, backup_name);
+		op_status = TWPartitionManager::IsBackupNameValid(backup_name, true, true) ? 0 : 1;
 	}
 
 	operation_end(op_status);
@@ -1465,7 +1463,7 @@ int GUIAction::decrypt(std::string arg __unused)
 		if (DataManager::GetIntValue(TW_IS_FBE)) {  // for FBE
 			DataManager::GetValue("tw_crypto_user_id", userID);
 			if (userID != "") {
-				op_status = PartitionManager.Decrypt_Device(Password, atoi(userID.c_str()));
+				op_status = PartitionManager.DecryptDevice(Password, atoi(userID.c_str()));
 				if (userID != "0") {
 					if (op_status != 0)
 						op_status = 1;
@@ -1478,7 +1476,7 @@ int GUIAction::decrypt(std::string arg __unused)
 			}
 		::sleep(1);
 		} else {  // for FDE
-			op_status = PartitionManager.Decrypt_Device(Password);
+			op_status = PartitionManager.DecryptDevice(Password);
 		}
 
 		if (op_status != 0)
@@ -1530,9 +1528,9 @@ int GUIAction::adbsideload(std::string arg __unused)
 			int wipe_dalvik = 0;
 			DataManager::GetValue("tw_wipe_dalvik", wipe_dalvik);
 			if (wipe_cache || DataManager::GetIntValue("tw_wipe_cache"))
-				PartitionManager.Wipe_By_Path("/cache");
+				PartitionManager.WipeByPath("/cache");
 			if (wipe_dalvik)
-				PartitionManager.Wipe_Dalvik_Cache();
+				PartitionManager.WipeDalvikCache();
 		}
 		TWFunc::ToggleMtp(mtp_was_enabled);
 		operation_end(ret);
@@ -1643,7 +1641,7 @@ int GUIAction::repair(std::string arg __unused)
 	} else {
 		std::string part_path;
 		DataManager::GetValue("tw_partition_mount_point", part_path);
-		if (PartitionManager.Repair_By_Path(part_path, true)) {
+		if (PartitionManager.RepairByPath(part_path, true)) {
 			op_status = 0; // success
 		} else {
 			op_status = 1; // fail
@@ -1664,7 +1662,7 @@ int GUIAction::resize(std::string arg __unused)
 	} else {
 		std::string part_path;
 		DataManager::GetValue("tw_partition_mount_point", part_path);
-		if (PartitionManager.Resize_By_Path(part_path, true)) {
+		if (PartitionManager.ResizeByPath(part_path, true)) {
 			op_status = 0; // success
 		} else {
 			op_status = 1; // fail
@@ -1686,14 +1684,14 @@ int GUIAction::changefilesystem(std::string arg __unused)
 		std::string part_path, file_system;
 		DataManager::GetValue("tw_partition_mount_point", part_path);
 		DataManager::GetValue("tw_action_new_file_system", file_system);
-		if (PartitionManager.Wipe_By_Path(part_path, file_system)) {
+		if (PartitionManager.WipeByPath(part_path, file_system)) {
 			op_status = 0; // success
 		} else {
 			gui_err("change_fs_err=Error changing file system.");
 			op_status = 1; // fail
 		}
 	}
-	PartitionManager.Update_System_Details();
+	PartitionManager.UpdateSystemDetails();
 	operation_end(op_status);
 	return 0;
 }
@@ -1703,7 +1701,7 @@ int GUIAction::startmtp(std::string arg __unused)
 	int op_status = 0;
 
 	operation_start("Start MTP");
-	if (PartitionManager.Enable_MTP())
+	if (PartitionManager.EnableMtp())
 		op_status = 0; // success
 	else
 		op_status = 1; // fail
@@ -1717,7 +1715,7 @@ int GUIAction::stopmtp(std::string arg __unused)
 	int op_status = 0;
 
 	operation_start("Stop MTP");
-	if (PartitionManager.Disable_MTP())
+	if (PartitionManager.DisableMtp())
 		op_status = 0; // success
 	else
 		op_status = 1; // fail
@@ -1740,17 +1738,17 @@ int GUIAction::flashimage(std::string arg __unused)
 	std::string target = DataManager::GetStrValue("tw_flash_partition");
 	unsigned int pos = target.find_last_of(';');
 	std::string mount_point = pos != std::string::npos ? target.substr(0, pos) : "";
-	TWPartition* t_part = PartitionManager.Find_Partition_By_Path(mount_point);
+	TWPartition* t_part = PartitionManager.FindPartitionByPath(mount_point);
 	bool flash_in_both_slots = DataManager::GetIntValue("tw_flash_both_slots") ? true : false;
 
-	if (t_part != NULL && (flash_in_both_slots && t_part->SlotSelect)) 
+	if (t_part != NULL && (flash_in_both_slots && t_part->slot_select_)) 
 	{
-		std::string current_slot = PartitionManager.Get_Active_Slot_Display();
-		bool pre_op_status = PartitionManager.Flash_Image(path, filename);
+		std::string current_slot = PartitionManager.GetActiveSlotDisplay();
+		bool pre_op_status = PartitionManager.FlashImage(path, filename);
 
-		PartitionManager.Override_Active_Slot(current_slot == "A" ? "B" : "A");
-		op_status = (int) !(pre_op_status && PartitionManager.Flash_Image(path, filename));
-		PartitionManager.Override_Active_Slot(current_slot);
+		PartitionManager.OverrideActiveSlot(current_slot == "A" ? "B" : "A");
+		op_status = (int) !(pre_op_status && PartitionManager.FlashImage(path, filename));
+		PartitionManager.OverrideActiveSlot(current_slot);
 
 		DataManager::SetValue("tw_flash_both_slots", 0);
 		flag = false;
@@ -1758,7 +1756,7 @@ int GUIAction::flashimage(std::string arg __unused)
 #endif
 	if (flag)
 	{
-		if (PartitionManager.Flash_Image(path, filename))
+		if (PartitionManager.FlashImage(path, filename))
 			op_status = 0; // success
 		else
 			op_status = 1; // fail
@@ -1802,11 +1800,11 @@ int GUIAction::getKeyByName(std::string key)
 int GUIAction::checkpartitionlifetimewrites(std::string arg)
 {
 	int op_status = 0;
-	TWPartition* sys = PartitionManager.Find_Partition_By_Path(arg);
+	TWPartition* sys = PartitionManager.FindPartitionByPath(arg);
 
 	operation_start("Check Partition Lifetime Writes");
 	if (sys) {
-		if (sys->Check_Lifetime_Writes() != 0)
+		if (sys->CheckLifetimeWrites() != 0)
 			DataManager::SetValue("tw_lifetime_writes", 1);
 		else
 			DataManager::SetValue("tw_lifetime_writes", 0);
@@ -1823,38 +1821,38 @@ int GUIAction::checkpartitionlifetimewrites(std::string arg)
 int GUIAction::mountsystemtoggle(std::string arg)
 {
 	int op_status = 0;
-	bool remount_system = PartitionManager.Is_Mounted_By_Path(PartitionManager.Get_Android_Root_Path());
-	bool remount_vendor = PartitionManager.Is_Mounted_By_Path("/vendor");
+	bool remount_system = PartitionManager.IsMountedByPath(PartitionManager.GetAndroidRootPath());
+	bool remount_vendor = PartitionManager.IsMountedByPath("/vendor");
 
 	operation_start("Toggle System Mount");
-	if (!PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), true)) {
+	if (!PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), true)) {
 		op_status = 1; // fail
 	} else {
-		TWPartition* Part = PartitionManager.Find_Partition_By_Path(PartitionManager.Get_Android_Root_Path());
-		if (Part) {
+		TWPartition* part = PartitionManager.FindPartitionByPath(PartitionManager.GetAndroidRootPath());
+		if (part) {
 			if (arg == "0") {
 				DataManager::SetValue("tw_mount_system_ro", 0);
-				Part->Change_Mount_Read_Only(false);
+				part->ChangeMountReadOnly(false);
 			} else {
 				DataManager::SetValue("tw_mount_system_ro", 1);
-				Part->Change_Mount_Read_Only(true);
+				part->ChangeMountReadOnly(true);
 			}
 			if (remount_system) {
-				Part->Mount(true);
+				part->Mount(true);
 			}
 			op_status = 0; // success
 		} else {
 			op_status = 1; // fail
 		}
-		Part = PartitionManager.Find_Partition_By_Path("/vendor");
-		if (Part) {
+		part = PartitionManager.FindPartitionByPath("/vendor");
+		if (part) {
 			if (arg == "0") {
-				Part->Change_Mount_Read_Only(false);
+				part->ChangeMountReadOnly(false);
 			} else {
-				Part->Change_Mount_Read_Only(true);
+				part->ChangeMountReadOnly(true);
 			}
 			if (remount_vendor) {
-				Part->Mount(true);
+				part->Mount(true);
 			}
 			op_status = 0; // success
 		} else {
@@ -1889,15 +1887,15 @@ int GUIAction::setbootslot(std::string arg)
 {
 	operation_start("Set Boot Slot");
 	if (!simulate) {
-		if (PartitionManager.Find_Partition_By_Path("/vendor")) {
-			if (!PartitionManager.UnMount_By_Path("/vendor", false)) {
+		if (PartitionManager.FindPartitionByPath("/vendor")) {
+			if (!PartitionManager.UnmountByPath("/vendor", false)) {
 				// PartitionManager failed to unmount /vendor, this should not happen,
 				// but in case it does, do a lazy unmount
 				LOGINFO("WARNING: vendor partition could not be unmounted normally!\n");
-				PartitionManager.UnMount_By_Path("/vendor", false, MNT_DETACH);
+				PartitionManager.UnmountByPath("/vendor", false, MNT_DETACH);
 			}
 		}
-		PartitionManager.Set_Active_Slot(arg);
+		PartitionManager.SetActiveSlot(arg);
 	} else {
 		simulate_progress_bar();
 	}
@@ -1914,7 +1912,7 @@ int GUIAction::repackimage(std::string arg __unused)
 	if (!simulate)
 	{
 		std::string path = DataManager::GetStrValue("tw_filename");
-		Repack_Options_struct Repack_Options;
+		RepackOptionsStruct Repack_Options;
 		Repack_Options.Disable_Verity = false;
 		Repack_Options.Disable_Force_Encrypt = false;
 		Repack_Options.Backup_First = DataManager::GetIntValue("tw_repack_backup_first") != 0;
@@ -1962,9 +1960,9 @@ int GUIAction::fixabrecoverybootloop(std::string arg __unused)
 			goto exit;
 		}
 		DataManager::SetProgress(0);
-		TWPartition* part = PartitionManager.Find_Partition_By_Path("/boot");
+		TWPartition* part = PartitionManager.FindPartitionByPath("/boot");
 		if (part)
-			gui_msg(Msg("unpacking_image=Unpacking {1}...")(part->Display_Name));
+			gui_msg(Msg("unpacking_image=Unpacking {1}...")(part->display_name_));
 		else {
 			gui_msg(Msg(msg::kError, "unable_to_locate=Unable to locate {1}.")("/boot"));
 			goto exit;
@@ -1988,7 +1986,7 @@ int GUIAction::fixabrecoverybootloop(std::string arg __unused)
 			}
 		}
 		DataManager::SetProgress(.5);
-		gui_msg(Msg("repacking_image=Repacking {1}...")(part->Display_Name));
+		gui_msg(Msg("repacking_image=Repacking {1}...")(part->display_name_));
 		command = "cd " REPACK_ORIG_DIR " && /system/bin/magiskboot repack " REPACK_ORIG_DIR "boot.img";
 		if (TWFunc::ExecCmd(command) != 0) {
 			gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
@@ -1998,7 +1996,7 @@ int GUIAction::fixabrecoverybootloop(std::string arg __unused)
 		std::string path = REPACK_ORIG_DIR;
 		std::string file = "new-boot.img";
 		DataManager::SetValue("tw_flash_partition", "/boot;");
-		if (!PartitionManager.Flash_Image(path, file)) {
+		if (!PartitionManager.FlashImage(path, file)) {
 			LOGINFO("Error flashing new image\n");
 			goto exit;
 		}
@@ -2065,7 +2063,7 @@ int GUIAction::unmapsuperdevices(std::string arg __unused) {
 	if (simulate) {
 		simulate_progress_bar();
 	} else {
-		if (PartitionManager.Unmap_Super_Devices()) {
+		if (PartitionManager.UnmapSuperDevices()) {
 			op_status = 0;
 		}
 	}
@@ -2128,7 +2126,7 @@ int GUIAction::applycustomtwrpfolder(std::string arg __unused)
 
 int GUIAction::mergesnapshots(std::string arg __unused) {
 	int op_status = 1;
-	if (PartitionManager.Check_Pending_Merges()) {
+	if (PartitionManager.CheckPendingMerges()) {
 		op_status = 0;
 	}
 	operation_end(op_status);
@@ -2139,7 +2137,7 @@ int GUIAction::disableAVB2(std::string arg __unused) {
 	int op_status = 1;
 	operation_start("Disable AVB2.0");
 	gui_highlight("disabling_AVB2=Disabling AVB2.0...");
-	if (PartitionManager.Disable_AVB2(true)) {
+	if (PartitionManager.DisableAvb2(true)) {
 		op_status = 0;
 	}
 	operation_end(op_status);

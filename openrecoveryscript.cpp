@@ -65,7 +65,7 @@ int OpenRecoveryScript::check_for_script_file(void) {
 	else
 		orsFile = logDir;
 	orsFile += "/recovery/openrecoveryscript";
-	if (!PartitionManager.Mount_By_Path(orsFile, false)) {
+	if (!PartitionManager.MountByPath(orsFile, false)) {
 		LOGINFO("Unable to mount %s for OpenRecoveryScript support.\n", logDir.c_str());
 		gui_msg(Msg(msg::kError, "unable_to_mount=Unable to mount {1}")(logDir.c_str()));
 		return 0;
@@ -149,14 +149,14 @@ int OpenRecoveryScript::run_script_file(void) {
 			} else if (strcmp(command, "wipe") == 0) {
 				// Wipe
 				if (strcmp(value, "cache") == 0 || strcmp(value, "/cache") == 0) {
-					PartitionManager.Wipe_By_Path("/cache");
-				} else if (strcmp(value, "system") == 0 || strcmp(value, "/system") == 0 || strcmp(value, PartitionManager.Get_Android_Root_Path().c_str()) == 0) {
-					PartitionManager.Wipe_By_Path("/system");
-					PartitionManager.Update_System_Details();
+					PartitionManager.WipeByPath("/cache");
+				} else if (strcmp(value, "system") == 0 || strcmp(value, "/system") == 0 || strcmp(value, PartitionManager.GetAndroidRootPath().c_str()) == 0) {
+					PartitionManager.WipeByPath("/system");
+					PartitionManager.UpdateSystemDetails();
 				} else if (strcmp(value, "dalvik") == 0 || strcmp(value, "dalvick") == 0 || strcmp(value, "dalvikcache") == 0 || strcmp(value, "dalvickcache") == 0) {
-					PartitionManager.Wipe_Dalvik_Cache();
+					PartitionManager.WipeDalvikCache();
 				} else if (strcmp(value, "data") == 0 || strcmp(value, "/data") == 0 || strcmp(value, "factory") == 0 || strcmp(value, "factoryreset") == 0) {
-					PartitionManager.Factory_Reset();
+					PartitionManager.FactoryReset();
 				} else {
 					LOGERR("Error with wipe command value: '%s'\n", value);
 					ret_val = 1;
@@ -164,7 +164,7 @@ int OpenRecoveryScript::run_script_file(void) {
 			} else if (strcmp(command, "format") == 0) {
 				// Format
 				if (strcmp(value, "data") == 0 || strcmp(value, "/data") == 0 || strcmp(value, "factory") == 0 || strcmp(value, "factoryreset") == 0) {
-					PartitionManager.Format_Data();
+					PartitionManager.FormatData();
 				} else {
 					LOGERR("Error with format command value: '%s'\n", value);
 					ret_val = 1;
@@ -189,7 +189,7 @@ int OpenRecoveryScript::run_script_file(void) {
 					strncpy(value2, tok, line_len - remove_nl);
 					DataManager::SetValue(TW_BACKUP_NAME, value2);
 					gui_msg(Msg("backup_folder_set=Backup folder set to '{1}'")(value2));
-					if (PartitionManager.Check_Backup_Name(value2, true, true) != 0) {
+					if (!TWPartitionManager::IsBackupNameValid(value2, true, true)) {
 						ret_val = 1;
 						continue;
 					}
@@ -202,7 +202,7 @@ int OpenRecoveryScript::run_script_file(void) {
 			} else if (strcmp(command, "restore") == 0) {
 				// Restore
 				DataManager::SetValue("tw_action_text2", gui_parse_text("{@restore}"));
-				PartitionManager.Mount_All_Storage();
+				PartitionManager.MountAllStorage();
 				DataManager::SetValue(TW_SKIP_DIGEST_CHECK_VAR, 0);
 				char folder_path[512], partitions[512];
 
@@ -225,11 +225,11 @@ int OpenRecoveryScript::run_script_file(void) {
 					string folder_var;
 					std::vector<PartitionList> Storage_List;
 
-					PartitionManager.Get_Partition_List("storage", &Storage_List);
+					PartitionManager.GetPartitionList("storage", &Storage_List);
 					int listSize = Storage_List.size();
 					for (int i = 0; i < listSize; i++) {
-						if (PartitionManager.Is_Mounted_By_Path(Storage_List.at(i).Mount_Point)) {
-							DataManager::SetValue("tw_storage_path", Storage_List.at(i).Mount_Point);
+						if (PartitionManager.IsMountedByPath(Storage_List.at(i).mount_point)) {
+							DataManager::SetValue("tw_storage_path", Storage_List.at(i).mount_point);
 							DataManager::GetValue(TW_BACKUPS_FOLDER_VAR, folder_var);
 							sprintf(backup_folder, "%s/%s", folder_var.c_str(), folder_path);
 							if (TWFunc::IsPathExists(backup_folder)) {
@@ -251,7 +251,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				}
 				DataManager::SetValue("tw_restore", folder_path);
 
-				PartitionManager.Set_Restore_Files(folder_path);
+				PartitionManager.SetRestoreFiles(folder_path);
 				string Partition_List;
 				int is_encrypted = 0;
 				DataManager::GetValue("tw_restore_encrypted", is_encrypted);
@@ -298,7 +298,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				if (is_encrypted) {
 					gui_err("ors_encrypt_restore_err=Unable to use OpenRecoveryScript to restore an encrypted backup.");
 					ret_val = 1;
-				} else if (!PartitionManager.Run_Restore(folder_path))
+				} else if (!PartitionManager.RunRestore(folder_path))
 					ret_val = 1;
 				else
 					gui_msg("done=Done.");
@@ -313,8 +313,8 @@ int OpenRecoveryScript::run_script_file(void) {
 				} else
 					strcpy(mount, value);
 				if (!strcmp(mount, "/system"))
-					strcpy(mount, PartitionManager.Get_Android_Root_Path().c_str());
-				if (PartitionManager.Mount_By_Path(mount, true))
+					strcpy(mount, PartitionManager.GetAndroidRootPath().c_str());
+				if (PartitionManager.MountByPath(mount, true))
 					gui_msg(Msg("mounted=Mounted '{1}'")(mount));
 			} else if (strcmp(command, "unmount") == 0 || strcmp(command, "umount") == 0) {
 				// Unmount
@@ -325,8 +325,8 @@ int OpenRecoveryScript::run_script_file(void) {
 				} else
 					strcpy(mount, value);
 				if (!strcmp(mount, "/system"))
-					strcpy(mount, PartitionManager.Get_Android_Root_Path().c_str());
-				if (PartitionManager.UnMount_By_Path(mount, true))
+					strcpy(mount, PartitionManager.GetAndroidRootPath().c_str());
+				if (PartitionManager.UnmountByPath(mount, true))
 					gui_msg(Msg("unmounted=Unounted '{1}'")(mount));
 			} else if (strcmp(command, "set") == 0) {
 				// Set value
@@ -389,12 +389,12 @@ int OpenRecoveryScript::run_script_file(void) {
 					ret_val = 1; // failure
 				} else if (TWinstall_zip(FUSE_SIDELOAD_HOST_PATHNAME, &wipe_cache) == 0) {
 					if (wipe_cache)
-						PartitionManager.Wipe_By_Path("/cache");
+						PartitionManager.WipeByPath("/cache");
 				} else {
 					ret_val = 1; // failure
 				}
-				PartitionManager.Unlock_Block_Partitions();
-				PartitionManager.Update_System_Details();
+				PartitionManager.UnlockBlockPartitions();
+				PartitionManager.UpdateSystemDetails();
 				sideload = 1; // Causes device to go to the home screen afterwards
 				pid_t sideload_child_pid = GetMiniAdbdPid();
 				if (sideload_child_pid != 0) {
@@ -410,7 +410,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				property_set("ctl.start", "adbd");
 				gui_msg("done=Done.");
 			} else if (strcmp(command, "fixperms") == 0 || strcmp(command, "fixpermissions") == 0 || strcmp(command, "fixcontexts") == 0) {
-				ret_val = PartitionManager.Fix_Contexts();
+				ret_val = PartitionManager.FixContexts();
 				if (ret_val != 0)
 					ret_val = 1; // failure
 			} else if (strcmp(command, "decrypt") == 0) {
@@ -424,7 +424,7 @@ int OpenRecoveryScript::run_script_file(void) {
 					if (args.size() > 1)
 						userid = args[1];
 
-					ret_val = PartitionManager.Decrypt_Device(pass, atoi(userid.c_str()));
+					ret_val = PartitionManager.DecryptDevice(pass, atoi(userid.c_str()));
 					if (ret_val != 0)
 						ret_val = 1;  // failure
 				} else {
@@ -474,7 +474,7 @@ int OpenRecoveryScript::Install_Command(string Zip) {
 	if (Zip.substr(0, 1) == "@") {
 		// This is a special file that contains a map of blocks on the data partition
 		Full_Path = Zip.substr(1);
-		if (!PartitionManager.Mount_By_Path(Full_Path, true) || !TWFunc::IsPathExists(Full_Path)) {
+		if (!PartitionManager.MountByPath(Full_Path, true) || !TWFunc::IsPathExists(Full_Path)) {
 			LOGINFO("Unable to install via mapped zip '%s'\n", Full_Path.c_str());
 			gui_msg(Msg(msg::kError, "zip_err=Error installing zip file '{1}'")(Zip));
 			return 1;
@@ -482,19 +482,19 @@ int OpenRecoveryScript::Install_Command(string Zip) {
 		LOGINFO("Installing mapped zip file '%s'\n", Full_Path.c_str());
 		gui_msg(Msg("installing_zip=Installing zip file '{1}'")(Zip));
 	} else if (!TWFunc::IsPathExists(Zip)) {
-		PartitionManager.Mount_All_Storage();
-		PartitionManager.Get_Partition_List("storage", &Storage_List);
+		PartitionManager.MountAllStorage();
+		PartitionManager.GetPartitionList("storage", &Storage_List);
 		int listSize = Storage_List.size();
 		for (int i = 0; i < listSize; i++) {
-			if (PartitionManager.Is_Mounted_By_Path(Storage_List.at(i).Mount_Point)) {
-				Full_Path = Storage_List.at(i).Mount_Point + "/" + Zip;
+			if (PartitionManager.IsMountedByPath(Storage_List.at(i).mount_point)) {
+				Full_Path = Storage_List.at(i).mount_point + "/" + Zip;
 				if (TWFunc::IsPathExists(Full_Path)) {
 					Zip = Full_Path;
 					break;
 				}
 				Full_Path = Zip;
-				LOGINFO("Trying to find zip '%s' on '%s'...\n", Full_Path.c_str(), Storage_List.at(i).Mount_Point.c_str());
-				ret_string = Locate_Zip_File(Full_Path, Storage_List.at(i).Mount_Point);
+				LOGINFO("Trying to find zip '%s' on '%s'...\n", Full_Path.c_str(), Storage_List.at(i).mount_point.c_str());
+				ret_string = Locate_Zip_File(Full_Path, Storage_List.at(i).mount_point);
 				if (!ret_string.empty()) {
 					Zip = ret_string;
 					break;
@@ -514,7 +514,7 @@ int OpenRecoveryScript::Install_Command(string Zip) {
 		gui_msg(Msg(msg::kError, "zip_err=Error installing zip file '{1}'")(Zip));
 		ret_val = 1;
 	} else if (wipe_cache)
-		PartitionManager.Wipe_By_Path("/cache");
+		PartitionManager.WipeByPath("/cache");
 
 	return ret_val;
 }
@@ -592,7 +592,7 @@ int OpenRecoveryScript::Backup_Command(string Options) {
 		}
 	}
 	DataManager::SetValue("tw_backup_list", Backup_List);
-	if (!PartitionManager.Run_Backup()) {
+	if (!PartitionManager.RunBackup()) {
 		gui_err("backup_fail=Backup Failed");
 		return 1;
 	}
@@ -690,7 +690,7 @@ void OpenRecoveryScript::Run_CLI_Command(const char* command) {
 				userid = parts[2];
 
 			gui_msg("decrypt_cmd=Attempting to decrypt data partition or user data via command line.");
-			if (PartitionManager.Decrypt_Device(pass, atoi(userid.c_str())) == 0) {
+			if (PartitionManager.DecryptDevice(pass, atoi(userid.c_str())) == 0) {
 				// set_page_done = 1;  // done by singleaction_page anyway
 				std::string orsFile = TWFunc::GetLogDir() + "/openrecoveryscript";
 				if (TWFunc::IsPathExists(orsFile)) {
@@ -709,20 +709,20 @@ void OpenRecoveryScript::Run_CLI_Command(const char* command) {
 
 int OpenRecoveryScript::remountrw(void)
 {
-	bool remount_system = PartitionManager.Is_Mounted_By_Path(PartitionManager.Get_Android_Root_Path());
+	bool remount_system = PartitionManager.IsMountedByPath(PartitionManager.GetAndroidRootPath());
 	int op_status;
-	TWPartition* Part;
+	TWPartition* part;
 
-	if (!PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), true)) {
+	if (!PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), true)) {
 		op_status = 1; // fail
 	} else {
-		Part = PartitionManager.Find_Partition_By_Path(PartitionManager.Get_Android_Root_Path());
-		if (Part) {
+		part = PartitionManager.FindPartitionByPath(PartitionManager.GetAndroidRootPath());
+		if (part) {
 			DataManager::SetValue("tw_mount_system_ro", 0);
-			Part->Change_Mount_Read_Only(false);
+			part->ChangeMountReadOnly(false);
 		}
 		if (remount_system) {
-			Part->Mount(true);
+			part->Mount(true);
 		}
 		op_status = 0; // success
 	}

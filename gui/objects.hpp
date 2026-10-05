@@ -616,7 +616,7 @@ protected:
 		std::string fileName;
 		unsigned char fileType;	 // Uses d_type format from struct dirent
 		mode_t protection;		  // Uses mode_t format from stat
-		uid_t userId;
+		uid_t user_id;
 		gid_t groupId;
 		off_t fileSize;
 		time_t lastAccess;		  // Uses time_t format from stat

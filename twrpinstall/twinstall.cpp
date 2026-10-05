@@ -70,7 +70,7 @@ static int Install_Theme(const char* path, ZipArchiveHandle Zip) {
 	if (FindEntry(Zip, binary_name, &binary_entry) != 0) {
 		return INSTALL_CORRUPT;
 	}
-	if (!PartitionManager.Mount_Settings_Storage(true))
+	if (!PartitionManager.MountSettingsStorage(true))
 		return INSTALL_ERROR;
 	string theme_path = DataManager::GetSettingsStoragePath();
 	theme_path += "/TWRP/theme";
@@ -298,7 +298,7 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 
 	if (unmount_system) {
 		gui_msg("unmount_system=Unmounting System...");
-		if(!PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), true)) {
+		if(!PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), true)) {
 			gui_err("unmount_system_err=Failed unmounting System");
 			return -1;
 		}
@@ -327,24 +327,24 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		ZipEntry64 ab_binary_entry;
 		if (FindEntry(Zip, ab_binary_name, &ab_binary_entry) == 0) {
 			LOGINFO("AB zip\n");
-			gui_msg(Msg(msg::kHighlight, "flash_ab_inactive=Flashing A/B zip to inactive slot: {1}")(PartitionManager.Get_Active_Slot_Display()=="A"?"B":"A"));
+			gui_msg(Msg(msg::kHighlight, "flash_ab_inactive=Flashing A/B zip to inactive slot: {1}")(PartitionManager.GetActiveSlotDisplay()=="A"?"B":"A"));
 			// We need this so backuptool can do its magic
-			bool system_mount_state = PartitionManager.Is_Mounted_By_Path(PartitionManager.Get_Android_Root_Path());
-			bool vendor_mount_state = PartitionManager.Is_Mounted_By_Path("/vendor");
-			PartitionManager.Mount_By_Path(PartitionManager.Get_Android_Root_Path(), false);
-			PartitionManager.Mount_By_Path("/vendor", false);
+			bool system_mount_state = PartitionManager.IsMountedByPath(PartitionManager.GetAndroidRootPath());
+			bool vendor_mount_state = PartitionManager.IsMountedByPath("/vendor");
+			PartitionManager.MountByPath(PartitionManager.GetAndroidRootPath(), false);
+			PartitionManager.MountByPath("/vendor", false);
 			TWFunc::CopyFile("/system/bin/sh", "/tmp/sh", 0755);
 			mount("/tmp/sh", "/system/bin/sh", "auto", MS_BIND, NULL);
 			ret_val = Run_Update_Binary(path, wipe_cache, AB_OTA_ZIP_TYPE);
 			umount("/system/bin/sh");
 			unlink("/tmp/sh");
 			if (!vendor_mount_state)
-				PartitionManager.UnMount_By_Path("/vendor", false);
+				PartitionManager.UnmountByPath("/vendor", false);
 			if (!system_mount_state)
-				PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), false);
+				PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), false);
 			if (android::base::GetBoolProperty("ro.virtual_ab.enabled", false)) {
-				PartitionManager.Unlock_Block_Partitions();
-				PartitionManager.Prepare_All_Super_Volumes();
+				PartitionManager.UnlockBlockPartitions();
+				PartitionManager.PrepareAllSuperVolumes();
 				gui_warn("mount_vab_partitions=Devices on super may not mount until rebooting recovery.");
 			}
 			gui_warn("flash_ab_reboot=To flash additional zips, please reboot recovery to switch to the updated slot.");
@@ -375,7 +375,7 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 	if (ret_val == INSTALL_SUCCESS) gui_msg(Msg(msg::kHighlight, "install_took_seconds_msg=Install took {1} second(s).")(total_time));
 
 	if (_isUpdatePkg && ret_val == INSTALL_SUCCESS) {
-		if (DataManager::GetIntValue(TW_AUTO_DISABLE_AVB2_VAR)) PartitionManager.Disable_AVB2(true);
+		if (DataManager::GetIntValue(TW_AUTO_DISABLE_AVB2_VAR)) PartitionManager.DisableAvb2(true);
 	}
 
 	return ret_val;

@@ -64,7 +64,7 @@ static void DecryptPage(const bool skip_decryption, const bool data_media) {
   if (DataManager::GetIntValue(TW_IS_ENCRYPTED) != 0) {
     if (skip_decryption) {
       LOGINFO("Skipping decryption\n");
-      PartitionManager.Update_System_Details(true);
+      PartitionManager.UpdateSystemDetails(true);
     } else if (DataManager::GetIntValue(TW_CRYPTO_PWTYPE) != 0) {
       LOGINFO("Is encrypted, do decrypt page first\n");
       if (DataManager::GetIntValue(TW_IS_FBE)) DataManager::SetValue("tw_crypto_user_id", "0");
@@ -73,7 +73,7 @@ static void DecryptPage(const bool skip_decryption, const bool data_media) {
       }
     }
   } else if (data_media) {
-    PartitionManager.Update_System_Details(true);
+    PartitionManager.UpdateSystemDetails(true);
     if (tw_get_default_metadata(DataManager::GetCurrentStoragePath().c_str()) != 0) {
       LOGINFO("Failed to get default contexts and file mode for storage files.\n");
     } else {
@@ -86,7 +86,7 @@ static void ProcessFastbootdMode() {
   LOGINFO("starting fastboot\n");
 
   if (android::base::GetBoolProperty("ro.boot.dynamic_partitions", false)) {
-    PartitionManager.Unmap_Super_Devices();
+    PartitionManager.UnmapSuperDevices();
   }
 
   gui_msg(Msg("fastboot_console_msg=Entered Fastbootd mode..."));
@@ -127,7 +127,7 @@ static void ProcessRecoveryMode(const bool skip_decryption) {
   string current_prop;
 
   std::vector<std::string> partition_list;
-  partition_list.emplace_back(PartitionManager.Get_Android_Root_Path());
+  partition_list.emplace_back(TWPartitionManager::GetAndroidRootPath());
 #ifdef TW_OVERRIDE_PROPS_ADDITIONAL_PARTITIONS
   auto additional_partitions = TWFunc::SplitString(TW_OVERRIDE_PROPS_ADDITIONAL_PARTITIONS, " ");
   partition_list.reserve(partition_list.size() + additional_partitions.size());
@@ -169,7 +169,7 @@ static void ProcessRecoveryMode(const bool skip_decryption) {
             LOGERR("Failed overriding property %s, error_code: %d\n", current_prop.c_str(), error);
           }
           if (partition_mount_point == partition_list.back()) {
-            PartitionManager.UnMount_By_Path(partition_mount_point, false);
+            PartitionManager.UnmountByPath(partition_mount_point, false);
           }
           goto exit;
         } else {
@@ -182,7 +182,7 @@ static void ProcessRecoveryMode(const bool skip_decryption) {
           }
         }
       }
-      PartitionManager.UnMount_By_Path(partition_mount_point, false);
+      PartitionManager.UnmountByPath(partition_mount_point, false);
     }
   exit:
     continue;
@@ -202,7 +202,7 @@ static void ProcessRecoveryMode(const bool skip_decryption) {
   // Check for and load custom theme if present
   TWFunc::CheckSelinuxSupport();
   gui_loadCustomResources();
-  PartitionManager.Output_Partition_Logging();
+  PartitionManager.OutputPartitionLogging();
 
   // Fixup the RTC clock on devices which require it
   if (crash_counter == 0) TWFunc::FixupTimeOnBoot();
@@ -228,47 +228,46 @@ static void ProcessRecoveryMode(const bool skip_decryption) {
   if (try_mtp) {
     android::base::SetProperty("mtp.crash_check", "1");
     LOGINFO("Starting MTP\n");
-    if (!PartitionManager.Enable_MTP()) PartitionManager.Disable_MTP();
+    if (!PartitionManager.EnableMtp()) PartitionManager.DisableMtp();
     else gui_msg("mtp_enabled=MTP Enabled");
     android::base::SetProperty("mtp.crash_check", "0");
   } else if (mtp_crash_check != "0") {
     gui_warn("mtp_crash=MTP Crashed, not starting MTP on boot.");
     DataManager::SetValue("tw_mtp_enabled", 0);
-    PartitionManager.Disable_MTP();
+    PartitionManager.DisableMtp();
   } else if (crash_counter == 1) {
     LOGINFO("TWRP crashed; disabling MTP as a precaution.\n");
-    PartitionManager.Disable_MTP();
+    PartitionManager.DisableMtp();
   }
 #endif
 
   // Check if system has never been changed
-  TWPartition* sys = PartitionManager.Find_Partition_By_Path(
-      PartitionManager.Get_Android_Root_Path());
-  TWPartition* ven = PartitionManager.Find_Partition_By_Path("/vendor");
+  TWPartition* sys = PartitionManager.FindPartitionByPath(TWPartitionManager::GetAndroidRootPath());
+  TWPartition* ven = PartitionManager.FindPartitionByPath("/vendor");
   if (sys) {
-    if (sys->Get_Super_Status()) {
+    if (sys->GetSuperStatus()) {
 #ifdef TW_INCLUDE_CRYPTO
       std::string recovery_log_dir = std::string(DATA_LOGS_DIR) + "/recovery";
       if (!TWFunc::IsPathExists(recovery_log_dir)) {
-        if (!PartitionManager.Recreate_Logs_Dir())
+        if (!TWPartitionManager::RecreateLogsDir())
           LOGERR("Unable to create log directory for TWRP\n");
       }
 #endif
     } else {
       if (const int mount_system_ro = DataManager::GetIntValue("tw_mount_system_ro");
-        (mount_system_ro == 0 && sys->Check_Lifetime_Writes() == 0) || mount_system_ro == 2) {
+        (mount_system_ro == 0 && sys->CheckLifetimeWrites() == 0) || mount_system_ro == 2) {
         if (DataManager::GetIntValue("tw_never_show_system_ro_page") == 0) {
           DataManager::SetValue("tw_back", "main");
           if (gui_startPage("system_readonly", 1, 1) != 0) {
             LOGERR("Failed to start system_readonly GUI page.\n");
           }
         } else if (mount_system_ro == 0) {
-          sys->Change_Mount_Read_Only(false);
-          if (ven) ven->Change_Mount_Read_Only(false);
+          sys->ChangeMountReadOnly(false);
+          if (ven) ven->ChangeMountReadOnly(false);
         }
       } else if (mount_system_ro != 1) {
-        sys->Change_Mount_Read_Only(false);
-        if (ven) ven->Change_Mount_Read_Only(false);
+        sys->ChangeMountReadOnly(false);
+        if (ven) ven->ChangeMountReadOnly(false);
       }
     }
   }
@@ -392,7 +391,7 @@ int main(int argc, char* argv[]) {
     fstab_filename = "/etc/recovery.fstab";
   }
   printf("=> Processing %s\n", fstab_filename.c_str());
-  if (!PartitionManager.Process_Fstab(fstab_filename, true, !startup.GetFastbootMode())) {
+  if (!PartitionManager.ProcessFstab(fstab_filename, true, !startup.GetFastbootMode())) {
     LOGERR("Failing out of recovery due to problem with fstab.\n");
     return -1;
   }
@@ -406,8 +405,8 @@ int main(int argc, char* argv[]) {
       "/odm"
     };
     for (auto& prepare_part : prepare_parts) {
-      TWPartition* part = PartitionManager.Find_Partition_By_Path(prepare_part);
-      if (part) PartitionManager.Prepare_Super_Volume(part);
+      TWPartition* part = PartitionManager.FindPartitionByPath(prepare_part);
+      if (part) PartitionManager.PrepareSuperVolume(part);
     }
   }
 #endif
@@ -415,7 +414,7 @@ int main(int argc, char* argv[]) {
   printf("Starting the UI...\n");
   gui_init();
 
-  if (!startup.GetFastbootMode()) PartitionManager.Setup_Fstab_Partitions(true);
+  if (!startup.GetFastbootMode()) PartitionManager.SetupFstabPartitions(true);
 
   // Load up all the resources
   gui_loadResources();

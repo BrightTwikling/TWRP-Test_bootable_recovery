@@ -246,7 +246,7 @@ int GUIFileSelector::GetFileList(const std::string folder)
 	// leave the path variable pointing somewhere nobody asked for. Only make
 	// it while the storage is up, or it lands on the ramdisk under a mount
 	// point with nothing mounted on it.
-	if (mPathCreate && !TWFunc::IsPathExists(folder) && PartitionManager.Is_Mounted_By_Path(folder))
+	if (mPathCreate && !TWFunc::IsPathExists(folder) && PartitionManager.IsMountedByPath(folder))
 		TWFunc::RecursiveMkdir(folder);
 
 	std::error_code ec;
@@ -281,7 +281,7 @@ int GUIFileSelector::GetFileList(const std::string folder)
 		FileData data{
 		  .fileName = file_name,
 		  .protection = st.st_mode,
-		  .userId = st.st_uid,
+		  .user_id = st.st_uid,
 		  .groupId = st.st_gid,
 		  .fileSize = st.st_size,
 		  .lastAccess = st.st_atime,

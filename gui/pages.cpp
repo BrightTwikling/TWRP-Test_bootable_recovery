@@ -1396,7 +1396,7 @@ void PageManager::LoadLanguage(std::string filename) {
 		mCurrentSet->LoadLanguage(xmlFile, NULL);
 		free(xmlFile);
 	}
-	PartitionManager.Translate_Partition_Display_Names();
+	PartitionManager.TranslatePartitionDisplayNames();
 }
 
 int PageManager::LoadPackage(std::string name, std::string package, std::string startpage)
@@ -1574,7 +1574,7 @@ int PageManager::RunReload() {
 
 	mReloadTheme = false;
 	theme_path = DataManager::GetCurrentStoragePath();
-	if (PartitionManager.Mount_By_Path(theme_path.c_str(), 1) < 0) {
+	if (PartitionManager.MountByPath(theme_path.c_str(), 1) < 0) {
 		LOGERR("Unable to mount %s during gui_reload_theme function.\n", theme_path.c_str());
 		ret_val = 1;
 	}

@@ -96,7 +96,7 @@ public:
   static void AesDecryptStream(const std::string& password);
 
   // Returns the size of a file
-  static unsigned long GetFileSize(const std::string& path);
+  static uint64_t GetFileSize(const std::string& path);
 
   // Remove the beginning slash of a path
   static std::string RemoveBeginningSlash(const std::string& path);
@@ -233,6 +233,9 @@ public:
   // Loads /file_contexts into the global selinux_handle and reports whether the kernel
   // supports reading SELinux contexts
   static void CheckSelinuxSupport();
+
+  // Returned by OverrideProperty/DeleteProperty when libresetprop is unavailable
+  static constexpr int kNotAvailable = -2;
 
   // Override properties (including ro. properties)
   static int OverrideProperty(const std::string& key, const std::string& value);

@@ -91,8 +91,8 @@ bool KernelModuleLoader::LoadVendorModules() {
       break;
   }
 
-  TWPartition* ven = PartitionManager.Find_Partition_By_Path("/vendor");
-  TWPartition* ven_dlkm = PartitionManager.Find_Partition_By_Path("/vendor_dlkm");
+  TWPartition* ven = PartitionManager.FindPartitionByPath("/vendor");
+  TWPartition* ven_dlkm = PartitionManager.FindPartitionByPath("/vendor_dlkm");
   if (ven) {
     LOGINFO("Checking mounted /vendor\n");
     ven->Mount(true);
@@ -103,11 +103,11 @@ bool KernelModuleLoader::LoadVendorModules() {
   }
 
   auto unmount_with_kill = [](TWPartition* partition, int fallback_flags) {
-    if (!partition || partition->UnMount(false)) return;
+    if (!partition || partition->Unmount(false)) return;
 
-    const std::string mount_point = partition->Get_Mount_Point();
+    const std::string mount_point = partition->GetMountPoint();
     TWFunc::KillForUseTargetProcess(mount_point);
-    if (!partition->UnMount(false, fallback_flags)) {
+    if (!partition->Unmount(false, fallback_flags)) {
       LOGERR("Unable to unmount '%s' after killing processes\n", mount_point.c_str());
     }
   };
@@ -145,7 +145,7 @@ bool KernelModuleLoader::TryAndLoadModules(std::string module_dir, const bool ve
   if (mount(dest_module_dir.c_str(), module_dir.c_str(), nullptr, MS_BIND, nullptr) == 0) {
     Modprobe modprobe({ module_dir }, "modules.load.twrp", false);
     const bool loaded = modprobe.LoadListedModules(false);
-    PartitionManager.UnMount_By_Path(module_dir, false, MNT_DETACH);
+    PartitionManager.UnmountByPath(module_dir, false, MNT_DETACH);
     LOGINFO("libmodprobe processed %d modules from %s\n", modprobe.GetModuleCount(),
             module_dir.c_str());
     return loaded;

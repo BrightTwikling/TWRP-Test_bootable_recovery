@@ -16,18 +16,17 @@
     along with TWRP.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef __TWRP_Partition_Manager
-#define __TWRP_Partition_Manager
+#ifndef TWRP_PARTITION_MANAGER
+#define TWRP_PARTITION_MANAGER
+
+#include <sys/poll.h>
 
 #include <atomic>
-#include <map>
-#include <vector>
 #include <filesystem>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
-
-#include <sys/poll.h>
 
 #include "exclude.hpp"
 #include "progresstracking.hpp"
@@ -36,493 +35,935 @@
 #include "fscrypt_policy.h"
 #endif
 
-#include "twrp_apex.hpp"
-
-inline constexpr int MAX_FSTAB_LINE_LENGTH = 2048;
-
 #define REPACK_ORIG_DIR "/tmp/repackorig/"
 #define REPACK_NEW_DIR "/tmp/repacknew/"
-
-inline constexpr int NOT_AVAILABLE = -2;
-
-using namespace std;
 
 // BasePartition is used for overriding so we can run custom, device
 // specific code.
 class BasePartition {
 public:
-    explicit BasePartition() {
-    }
+  BasePartition() = default;
 
-    virtual ~BasePartition() {
-    }
+  virtual ~BasePartition() = default;
 
-    virtual bool PreWipeEncryption() {
-        return true;
-    }
+  virtual bool PreWipeEncryption() {
+    return true;
+  }
 
-    virtual bool PostWipeEncryption() {
-        return true;
-    }
+  virtual bool PostWipeEncryption() {
+    return true;
+  }
 };
 
-BasePartition *make_partition();
+BasePartition* MakePartition();
 
 struct PartitionList {
-    std::string Display_Name;
-    std::string Mount_Point;
-    bool selected;
+  std::string display_name;
+  std::string mount_point;
+  bool selected;
 };
 
-struct Uevent_Block_Data {
-    std::string action;
-    std::string subsystem;
-    std::string block_device;
-    std::string type;
-    std::string sysfs_path;
-    int major;
-    int minor;
+struct UeventBlockData {
+  std::string action;
+  std::string subsystem;
+  std::string block_device;
+  std::string type;
+  std::string sysfs_path;
 };
 
-struct Flags_Map {
-    std::string Primary_Block_Device;
-    std::string Alternate_Block_Device;
-    std::string File_System;
-    std::string Flags;
-    std::string fstab_line;
+struct FlagsMap {
+  std::string primary_block_device;
+  std::string alternate_block_device;
+  std::string file_system;
+  std::string flags;
+  std::string fstab_line;
 };
 
-// PartitionManager Restore Mode for Raw_Read_Write()
+// Operation direction for RawReadWrite(): backup reads from the block
+// device, restore writes to it.
 enum class PartitionManagerOp {
-    PM_BACKUP = 0,
-    PM_RESTORE = 1,
+  kBackup = 0,
+  kRestore = 1,
 };
 
 class TWPartition;
 
 // Settings for backup session
 struct PartitionSettings {
-    TWPartition *Part; // Partition to pass to the partition backup loop
-    std::string Backup_Folder; // Path to restore folder
-    bool generate_digest; // tell system to create digest for partitions
-    bool generate_md5; // tell system to create md5 for partitions
-    uint64_t total_restore_size; // Total size of restored backup
-    uint64_t img_bytes_remaining; // remaining img/emmc bytes to backup for progress indicator
-    uint64_t file_bytes_remaining; // remaining file bytes to backup for progress indicator
-    uint64_t img_time; // used to calculate how fast we backup images
-    uint64_t file_time; // used to calculate how fast we backup files
-    uint64_t img_bytes; // total image bytes of all emmc partitions
-    uint64_t file_bytes; // total file bytes of all file based partitions
-    int partition_count; // Number of partitions to restore
-    ProgressTracking *progress; // Keep track of progress in GUI
-    PartitionManagerOp PM_Method;  // Current operation of backup or restore
+  // Partition to pass to the partition backup loop
+  TWPartition* part = nullptr;
+  // Path to restore folder
+  std::string backup_folder;
+  // tell system to create digest for partitions
+  bool generate_digest = false;
+  // Total size of restored backup
+  uint64_t total_restore_size = 0;
+  // remaining img/emmc bytes to backup for progress indicator
+  uint64_t img_bytes_remaining = 0;
+  // remaining file bytes to backup for progress indicator
+  uint64_t file_bytes_remaining = 0;
+  // used to calculate how fast we backup images
+  uint64_t img_time = 0;
+  // used to calculate how fast we backup files
+  uint64_t file_time = 0;
+  // total image bytes of all emmc partitions
+  uint64_t img_bytes = 0;
+  // total file bytes of all file based partitions
+  uint64_t file_bytes = 0;
+  // Number of partitions to restore
+  int partition_count = 0;
+  // Keep track of progress in GUI
+  ProgressTracking* progress = nullptr;
+  // Current operation of backup or restore
+  PartitionManagerOp pm_method = PartitionManagerOp::kBackup;
 };
 
 enum class BackupMethod {
-    BM_NONE = 0,
-    BM_FILES = 1,
-    BM_DD = 2,
+  kNone = 0,
+  kFiles = 1,
+  kDd = 2,
+};
+
+// Custom twrp fstab flags, matched against the tw_flags[] table in partition.cpp
+enum class TWFlag {
+  // Retain position
+  kDefaults,
+  kAndSec,
+  kBackup,
+  kBackupName,
+  kBlockSize,
+  kCanBeWiped,
+  kCanEncryptBackup,
+  kDisplay,
+  kEncryptable,
+  kFileEncryption,
+  kMetadataEncryption,
+  kFlashImg,
+  kForceEncrypt,
+  kFsFlags,
+  kIgnoreBlkid,
+  kLength,
+  kMountToDecrypt,
+  kQuota,
+  kRemovable,
+  kSettingsStorage,
+  kStorage,
+  kStorageName,
+  kSubPartitionOf,
+  kSymlink,
+  kUserDataEncryptBackup,
+  kUserMrf,
+  kWipeDuringFactoryReset,
+  kWipeInGui,
+  kSlotSelect,
+  kWait,
+  kVerify,
+  kCheck,
+  kAltDevice,
+  kNoTrim,
+  kVoldManaged,
+  kFormattable,
+  kResize,
+  kKeyDirectory,
+  kWrappedKey,
+  kAdoptedMountDelay,
+  kDmUseOriginalPath,
+  kFsCompress,
+  kLogical,
+  kMetadataCsum,
 };
 
 // Partition class
 class TWPartition {
 public:
-    TWPartition();
+  TWPartition();
 
-    virtual ~TWPartition();
+  virtual ~TWPartition() = default;
 
-    bool Is_Mounted(); // Checks mount to see if the partition is currently mounted
-    bool Is_File_System_Writable(); // Checks if the root directory of the file system can be written to
-    bool Mount(bool Display_Error); // Mounts the partition if it is not mounted
-    bool UnMount(bool Display_Error, int flags = 0); // Unmounts the partition if it is mounted
-    bool ReMount(bool Display_Error); // Remounts the partition
-    bool ReMount_RW(bool Display_Error); // Remounts the partition with read/write access
-    bool Bind_Mount(bool Display_Error); // Bind mount partition if symlink mountpoint is populated
-    bool BlkDiscard(); // Clear the partition using BLKDISCARD ioctl
-    bool Wipe(std::string New_File_System); // Wipes the partition
-    bool Wipe(); // Wipes the partition
-    bool Wipe_AndSec(); // Wipes android secure
-    bool Wipe_Data_Cache(); // Wipe /data/cache with devices that have no cache partition
-    bool Can_Repair(); // Checks to see if we have everything needed to be able to repair the current file system
-    uint64_t Get_Max_FileSize(); // get partition maxFileSie
-    bool Repair(); // Repairs the current file system
-    bool Can_Resize(); // Checks to see if we have everything needed to be able to resize the current file system
-    bool Resize(); // Resizes the current file system
-    bool Backup(PartitionSettings *part_settings, pid_t *tar_fork_pid);
+  // Checks mount to see if the partition is currently mounted
+  [[nodiscard]] bool IsMounted() const;
 
-    // Backs up the partition to the folder specified
-    bool Restore(PartitionSettings *part_settings); // Restores the partition using the backup folder provided
-    unsigned long long Get_Restore_Size(PartitionSettings *part_settings);
+  // Checks if the root directory of the file system can be written to
+  [[nodiscard]] bool IsFileSystemWritable() const;
 
-    // Returns the overall restore size of the backup
-    std::string Backup_Method_By_Name(); // Returns a string of the backup method for human readable output
-    bool Decrypt(std::string Password); // Decrypts the partition, return 0 for failure and -1 for success
-    bool Wipe_Encryption(); // Ignores wipe commands for /data/media devices and formats the original block device
-    void Check_FS_Type(); // Checks the filesystem type using blkid
-    bool Update_Size(bool Display_Error, bool Defer_Folder_Size = false);
+  // Mounts the partition if it is not mounted
+  bool Mount(bool display_error);
 
-    // Updates size information, Defer_Folder_Size leaves the data/media walk to Update_Data_Size_Async()
-    void Update_Data_Size_Async(); // Starts a deferred data/media size scan
-    void Apply_Async_Data_Size(); // Applies a completed scan on the caller thread
-    static bool Data_Is_Locked(); // True while user 0's CE storage is still locked
-    void Recreate_Media_Folder(); // Recreates the /data/media folder
-    bool Flash_Image(PartitionSettings *part_settings); // Flashes an image to the partition
-    void Change_Mount_Read_Only(bool new_value); // Changes Mount_Read_Only to new_value
-    bool Is_Read_Only(); // Check if system is read-only in TWRP
-    int Check_Lifetime_Writes();
+  // Unmounts the partition if it is mounted
+  [[nodiscard]] bool Unmount(bool display_error, int flags = 0) const;
 
-    void Partition_Post_Processing(bool Display_Error); // Apply partition specific settings after fstab processed
-    void Set_Backup_FileName(std::string fname); // Set backup filename for partition
-    std::string Get_Backup_FileName(); // Get the backup filename for the partition
-    std::string Get_Backup_Name(); // Get Backup_Name for partition
-    bool Decrypt_FBE_DE(); // If FBE is present, backup exclusions are set up and DE decrypt is attempted
-    std::string Get_Mount_Point(); // Return Mount_Point or directory the current partition is mounted on
-    bool Get_Super_Status(); // Returns true if partition is a super volume mounted partitions
-    void Set_Can_Be_Backed_Up(bool val); // Update whether the partition can be backed up or not
-    void Set_Can_Be_Wiped(bool val); // Update whether the partition can be wiped or not
-    std::string Get_Display_Name(); // Get the display name in the gui for the partition
-    bool Is_SlotSelect(); // Return whether the partition is a slot partition or not
+  // Remounts the partition
+  bool Remount(bool display_error);
 
-    std::string Current_File_System; // Current file system
-    std::string Actual_Block_Device; // Actual block device (one of primary, alternate, or decrypted)
-    std::string Backup_Display_Name; // Name displayed in the partition list for backup selection
-    bool Is_Present; // Indicates if the partition is currently present as a block device
-    unsigned int MTP_Storage_ID;
-    std::string Adopted_GUID;
-    unsigned int Adopted_Mount_Delay;
+  // Remounts the partition with read/write access
+  bool RemountRw(bool display_error);
+
+  // Bind mount partition if symlink mountpoint is populated
+  [[nodiscard]] bool BindMount() const;
+
+  // Clear the partition using BLKDISCARD ioctl
+  [[nodiscard]] bool BlkDiscard() const;
+
+  // Wipes the partition
+  bool Wipe(const std::string& new_file_system);
+
+  // Wipes the partition
+  bool Wipe();
+
+  // Wipes android secure
+  bool WipeAndSec();
+
+  // Wipe /data/cache with devices that have no cache partition
+  bool WipeDataCache();
+
+  // Checks to see if we have everything needed to be able to repair the current file system
+  [[nodiscard]] bool CanRepair() const;
+
+  // get partition max file size
+  [[nodiscard]] uint64_t GetMaxFileSize() const;
+
+  // Repairs the current file system
+  bool Repair();
+
+  // Checks to see if we have everything needed to be able to resize the current file system
+  [[nodiscard]] bool CanResize() const;
+
+  // Resizes the current file system
+  bool Resize();
+
+  // Backs up the partition to the folder specified
+  bool Backup(PartitionSettings* part_settings, pid_t* tar_fork_pid);
+
+  // Restores the partition using the backup folder provided
+  bool Restore(PartitionSettings* part_settings);
+
+  // Returns the overall restore size of the backup
+  uint64_t GetRestoreSize(PartitionSettings* part_settings);
+
+  // Returns a string of the backup method for human readable output
+  [[nodiscard]] std::string BackupMethodByName() const;
+
+  // Ignores wipe commands for /data/media devices and formats the original block device
+  bool WipeEncryption();
+
+  // Checks the filesystem type using blkid
+  void CheckFsType();
+
+  bool UpdateSize(bool display_error, bool defer_folder_size = false);
+
+  // Updates size information, defer_folder_size leaves the data/media walk to UpdateDataSizeAsync()
+  // Starts a deferred data/media size scan
+  void UpdateDataSizeAsync();
+
+  // Applies a completed scan on the caller thread
+  void ApplyAsyncDataSize();
+
+  // True while user 0's CE storage is still locked
+  [[nodiscard]] static bool DataIsLocked();
+
+  // Recreates the /data/media folder
+  void RecreateMediaFolder();
+
+  // Flashes an image to the partition
+  bool FlashImage(const PartitionSettings* part_settings);
+
+  // Changes mount_read_only_ to new_value
+  void ChangeMountReadOnly(bool new_value);
+
+  // Check if system is read-only in TWRP
+  [[nodiscard]] bool IsReadOnly() const;
+
+  int CheckLifetimeWrites();
+
+  // Apply partition specific settings after fstab processed
+  void PartitionPostProcessing(bool display_error);
+
+  // Set backup filename for partition
+  void SetBackupFileName(const std::string& filename);
+
+  // Get the backup filename for the partition
+  std::string GetBackupFileName();
+
+  // Get backup_name_ for partition
+  std::string GetBackupName();
+
+  // If FBE is present, backup exclusions are set up and DE decrypt is attempted
+  bool DecryptFbeDe();
+
+  // Return mount_point_ or directory the current partition is mounted on
+  std::string GetMountPoint();
+
+  // Returns true if this partition is a super volume
+  [[nodiscard]] bool GetSuperStatus() const;
+
+  // Update whether the partition can be backed up or not
+  void SetCanBeBackedUp(bool val);
+
+  // Update whether the partition can be wiped or not
+  void SetCanBeWiped(bool val);
+
+  // Get the display name in the gui for the partition
+  std::string GetDisplayName();
+
+  // Return whether the partition is a slot partition or not
+  [[nodiscard]] bool IsSlotSelect() const;
+
+  // Current file system
+  std::string current_file_system_;
+  // Actual block device (one of primary, alternate, or decrypted)
+  std::string actual_block_device_;
+  // By-name path saved before FindRealBlockDevice resolves symlinks, for slot_select suffix logic
+  std::string original_block_device_;
+  // Name displayed in the partition list for backup selection
+  std::string backup_display_name_;
+  // Indicates if the partition is currently present as a block device
+  bool is_present_;
+  unsigned int mtp_storage_id_;
 
 protected:
-    bool Has_Data_Media; // Indicates presence of /data/media, may affect wiping and backup methods
-    void Setup_Data_Media(); // Sets up a partition as a /data/media emulated storage partition
-    void Set_Block_Device(std::string block_device); // Allow super partition setup to change block device
+  // Indicates presence of /data/media, may affect wiping and backup methods
+  bool has_data_media_;
+
+  // Sets up a partition as a /data/media emulated storage partition
+  void SetupDataMedia();
+
+  // Allow super partition setup to change block device
+  void SetBlockDevice(const std::string& block_device);
 
 private:
-    bool Process_Fstab_Line(const char *fstab_line, bool Display_Error, std::map<std::string, Flags_Map> *twrp_flags);
+  // Processes a fstab line
+  bool ProcessFstabLine(const char* fstab_line, bool display_error,
+                        std::map<std::string, FlagsMap>* twrp_flags);
 
-    // Processes a fstab line
-    void Override_Block_Devices_From_Flags(int fstab_version, bool Display_Error,
-                                           std::map<std::string, Flags_Map> *twrp_flags);
+  // Overrides block devices from the twrp.flags file
+  void OverrideBlockDevicesFromFlags(int fstab_version, bool display_error,
+                                     std::map<std::string, FlagsMap>* twrp_flags);
 
-    // Overrides block devices from the twrp.flags file
-    void Apply_Block_Device_Attributes(std::string_view line); // Applies sysfs and wildcard block device attributes
-    bool Classify_By_Mount_Point(bool Display_Error); // Classifies the partition by mount point and file system type
-    void Apply_Twrp_Flags_File(int fstab_version, bool Display_Error, std::map<std::string, Flags_Map> *twrp_flags);
+  // Applies sysfs and wildcard block device attributes
+  void ApplyBlockDeviceAttributes(std::string_view line);
 
-    // Processes flags from the /etc/twrp.flags file
-    void Mount_Persist_Root_If_Needed(); // Mounts the persist root partition if applicable
-    void Setup_Data_Partition(bool Display_Error); // Setup data partition after fstab processed
-    void Set_FBE_Status(); // Set FBE status of partition
-    void Setup_Cache_Partition(bool Display_Error); // Setup cache partition after fstab processed
-    bool Find_Wildcard_Block_Devices(const std::string &Device); // Searches for and finds wildcard block devices
-    void Find_Actual_Block_Device(); // Determines the correct block device and stores it in Actual_Block_Device
-    void Apply_TW_Flag(unsigned flag, std::string_view str, bool val); // Apply custom twrp fstab flags
-    void Process_TW_Flags(std::string_view flags, bool Display_Error, int fstab_ver); // Process custom twrp fstab flags
-    void Process_FS_Flags(std::string_view str); // Process standard fstab fs flags
-    void Save_FS_Flags(const std::string &local_File_System, int local_Mount_Flags, const std::string &local_Mount_Options);
+  // Classifies the partition by mount point and file system type
+  bool ClassifyByMountPoint(bool display_error);
 
-    // Saves fs flags to a vector in case there are multiple lines in a v2 fstab with different mount flags for different file systems
-    bool Is_File_System(std::string File_System); // Checks to see if the file system given is considered a file system
-    bool Is_Image(std::string File_System); // Checks to see if the file system given is considered an image
-    void Setup_File_System(bool Display_Error); // Sets defaults for a file system partition
-    void Setup_Image(); // Sets defaults for an image partition
-    void Setup_AndSec(); // Sets up .android_secure settings
-    void Find_Real_Block_Device(std::string &Block_Device, bool Display_Error);
+  void ApplyTwrpFlagsFile(int fstab_version, bool display_error,
+                          std::map<std::string, FlagsMap>* twrp_flags);
 
-    // Checks the block device given and follows symlinks until it gets to the real block device
-    unsigned long long IOCTL_Get_Block_Size(); // Finds the partition size using ioctl
-    bool Find_Partition_Size(); // Finds the partition size from /proc/partitions
-    void Ensure_Subdirectory_Unmounted(const char *Mount_Point);
+  // Processes flags from the /etc/twrp.flags file
+  // Mounts the persist root partition if applicable
+  void MountPersistRootIfNeeded();
 
-    // Ensure that a subdirectory is unmounted before unmounting this partition
-    unsigned long long Get_Size_Via_du(std::string Path, bool Display_Error); // Uses du to get sizes
-    bool Wipe_EXTFS(std::string File_System); // Create an ext2/ext3/ext4 filesystem
-    bool Wipe_EXT4(); // Formats using ext4, uses make_ext4fs when present
-    bool Wipe_FAT(); // Formats as FAT if mkfs.fat exits otherwise rm -rf wipe
-    bool Wipe_EXFAT(); // Formats as EXFAT
-    bool Wipe_RMRF(); // Uses rm -rf to wipe
-    bool Wipe_F2FS(); // Uses make_f2fs to wipe
-    bool Wipe_NTFS(); // Uses mkntfs to wipe
-    bool Wipe_Data_Without_Wiping_Media(); // Uses rm -rf to wipe but does not wipe /data/media
-    bool Wipe_Data_Without_Wiping_Media_Func(const std::string &parent); // Uses rm -rf to wipe but does not wipe /data/media
-    bool Backup_Tar(PartitionSettings *part_settings, pid_t *tar_fork_pid); // Backs up using tar for file systems
-    bool Backup_Image(PartitionSettings *part_settings); // Backs up using raw read/write for emmc memory types
-    bool Raw_Read_Write(PartitionSettings *part_settings);
+  // Setup data partition after fstab processed
+  void SetupDataPartition(bool display_error);
 
-    std::string Get_Restore_File_System(PartitionSettings *part_settings);
+  // Set FBE status of partition
+  void SetFbeStatus();
 
-    // Returns the file system that was in place at the time of the backup
-    bool Restore_Tar(PartitionSettings *part_settings); // Restore using tar for file systems
-    bool Restore_Image(PartitionSettings *part_settings); // Restore using dd for images
-    bool Check_Restore_File_MD5(const std::string &Filename); // Verifies MD5 matches for a file before restoration
-    bool Get_Size_Via_statfs(bool Display_Error); // Get Partition size, used, and free space using statfs
-    bool Get_Size_Via_df(bool Display_Error); // Get Partition size, used, and free space using df command
-    bool Make_Dir(std::string Path, bool Display_Error); // Creates a directory if it doesn't already exist
-    void Recreate_AndSec_Folder(); // Recreates the .android_secure folder
-    bool Mount_Storage_Retry(bool Display_Error);
+  // Setup cache partition after fstab processed
+  void SetupCachePartition(bool display_error);
 
-    // Tries multiple times with a half second delay to mount a device in case storage is slow to mount
-    bool Is_Sparse_Image(const std::string &Filename); // Determines if a file is in sparse image format
-    bool Flash_Sparse_Image(const std::string &Filename); // Flashes a sparse image using libsparse
-    void ExcludeAll(const std::string &path); // Adds an exclusion for path to both the backup and wipe exclusion lists
+  // Searches for and finds wildcard block devices
+  bool FindWildcardBlockDevices(const std::string& device);
 
-    bool Can_Be_Mounted; // Indicates that the partition can be mounted
-    bool Can_Be_Wiped; // Indicates that the partition can be wiped
-    bool Can_Be_Backed_Up; // Indicates that the partition will show up in the backup list
-    bool Use_Rm_Rf; // Indicates that the partition will always be formatted w/ "rm -rf *"
-    bool Wipe_During_Factory_Reset; // Indicates that this partition is wiped during a factory reset
-    bool Wipe_Available_in_GUI; // Inidcates that the wipe can be user initiated in the GUI system
-    bool Is_SubPartition;
-    // Indicates that this partition is a sub-partition of another partition (e.g. datadata is a sub-partition of data)
-    bool Has_SubPartition; // Indicates that this partition has a sub-partition
-    std::string SubPartition_Of;
-    // Indicates which partition is the parent partition of this partition (e.g. /data is the parent partition of /datadata)
-    std::string Symlink_Path; // Symlink path (e.g. /data/media)
-    std::string Symlink_Mount_Point; // /sdcard could be the symlink mount point for /data/media
-    std::string Mount_Point; // Mount point for this partition (e.g. /system or /data)
-    std::string Backup_Path; // Path for backup
-    bool Wildcard_Block_Device; // If the block device contains an asterisk, we set this flag
-    std::string Sysfs_Entry;
-    // For v2 fstab, if the "block device" starts with /devices then it is a sysfs entry that is handled by uevents
-    std::string Primary_Block_Device; // Block device (e.g. /dev/block/mmcblk1p1)
-    std::string Alternate_Block_Device; // Alternate block device (e.g. /dev/block/mmcblk1)
-    std::string Decrypted_Block_Device; // Decrypted block device available after decryption
-    bool Removable;
-    // Indicates if this partition is removable -- affects how often we check overall size, if present, etc.
-    int Length;
-    // Used by make_ext4fs to leave free space at the end of the partition block for things like a crypto footer
-    uint64_t Size; // Overall size of the partition
-    uint64_t Used; // Overall used space
-    uint64_t Free; // Overall free space
-    uint64_t Backup_Size;
-    // Backup size -- may be different than used space especially when /data/media is present
-    bool Backup_Size_Provisional; // Backup_Size is the statfs figure, not the walked one
-    uint64_t Restore_Size; // Restore size of the current restore operation
-    bool Can_Be_Encrypted;
-    // This partition might be encrypted, affects error handling, can only be true if crypto support is compiled in
-    bool Is_Encrypted;
-    // This partition is thought to be encrypted -- it wouldn't mount for some reason, only avialble with crypto support
-    bool Is_Decrypted; // This partition has successfully been decrypted
-    bool Is_FBE; // File Based Encryption is present
-    bool Mount_To_Decrypt;
-    // Mount this partition during decrypt (/vendor, /firmware, etc in case we need proprietary libs or firmware files)
-    std::string Display_Name; // Display name for the GUI
-    std::string Backup_Name; // Backup name -- used for backup filenames
-    std::string Storage_Name; // Name displayed in the partition list for storage selection
-    std::string Backup_FileName; // Actual backup filename
-    BackupMethod Backup_Method;  // Method used for backup
-    bool Can_Encrypt_Backup; // Indicates if this item can be encrypted during backup
-    bool Use_Userdata_Encryption; // Indicates if we will use userdata encryption splitting on an encrypted backup
-    bool Has_Android_Secure; // Indicates the presence of .android_secure on this partition
-    bool Is_Storage; // Indicates if this partition is used for storage for backup, restore, and installing zips
-    bool Is_Settings_Storage;
-    // Indicates that this storage partition is the location of the .twrps settings file and the location that is used for custom themes
-    std::string Storage_Path;
-    // Indicates the path to the storage -- root indicates mount point, media/ indicates e.g. /data/media
-    std::string Fstab_File_System; // File system from the recovery.fstab
-    int Mount_Flags; // File system flags from recovery.fstab
-    std::string Mount_Options; // File system options from recovery.fstab
-    unsigned long Format_Block_Size; // Block size for formatting
-    bool Ignore_Blkid; // Ignore blkid results due to superblocks lying to us on certain devices / partitions
-    bool Can_Flash_Img; // Indicates if this partition can have images flashed to it via the GUI
-    bool Mount_Read_Only; // Only mount this partition as read-only
-    bool Is_Adopted_Storage; // Indicates that this partition is for adopted storage (android_expand)
-    bool SlotSelect; // Partition has A/B slots
-    TWExclude backup_exclusions; // Exclusions for file based backups
-    TWExclude wipe_exclusions; // Exclusions for file based wipes (data/media devices only)
-    std::string Key_Directory;
-    // Metadata key directory needed for mounting FBE encrypted data partitions using metadata encryption
-    std::string Original_Path;
-    bool Use_Original_Path;
-    bool Needs_Fs_Compress;
-    bool Needs_Metadata_Csum;
+  // Determines the correct block device and stores it in actual_block_device_
+  void FindActualBlockDevice();
 
-    struct partition_fs_flags_struct {
-        // This struct is used to store mount flags and options for different file systems for the same partition
-        std::string File_System;
-        int Mount_Flags;
-        std::string Mount_Options;
-    };
+  // Apply custom twrp fstab flags
+  void ApplyTwFlag(TWFlag flag, std::string_view str, bool val);
 
-    std::vector<partition_fs_flags_struct> fs_flags;
-    // This vector stores mount flags and options for different file systems for the same partition
-    bool Is_Super; // States whether partition should be loaded from the super partition
+  // Process custom twrp fstab flags
+  void ProcessTwFlags(std::string_view flags, bool display_error, int fstab_ver);
 
-    friend class TWPartitionManager;
-    friend class DataManager;
-    friend class GUIPartitionList;
-    friend class GUIAction;
-    friend class PageManager;
+  // Process standard fstab fs flags
+  void ProcessFsFlags(std::string_view str);
+
+  // Saves fs flags to a vector in case there are multiple lines in a v2 fstab with different mount flags for different file systems
+  void SaveFsFlags(const std::string& local_File_System, int local_Mount_Flags,
+                   const std::string& local_Mount_Options);
+
+  // Checks to see if the file system given is considered a file system
+  static bool IsFileSystem(std::string_view file_system);
+
+  // Checks to see if the file system given is considered an image
+  static bool IsImage(std::string_view file_system);
+
+  // Sets defaults for a file system partition
+  void SetupFileSystem(bool display_error);
+
+  // Sets defaults for an image partition
+  void SetupImage();
+
+  // Sets up .android_secure settings
+  void SetupAndSec();
+
+  void FindRealBlockDevice(string& block_device);
+
+  // Checks the block device given and follows symlinks until it gets to the real block device
+  // Finds the partition size using ioctl
+  uint64_t IoctlGetBlockSize();
+
+  // Finds the partition size from /proc/partitions
+  bool FindPartitionSize();
+
+  // Ensure that a subdirectory is unmounted before unmounting this partition
+  static void EnsureSubdirectoryUnmounted(const char* mount_point);
+
+  // Create an ext2/ext3/ext4 filesystem
+  bool WipeExtfs(const std::string& file_system);
+
+  // Formats using ext4, uses make_ext4fs when present
+  bool WipeExt4();
+
+  // Formats as FAT if mkfs.fat exits otherwise rm -rf wipe
+  bool WipeFat();
+
+  // Formats as EXFAT
+  bool WipeExfat();
+
+  // Uses rm -rf to wipe
+  bool WipeRmrf();
+
+  // Uses make_f2fs to wipe
+  bool WipeF2fs();
+
+  // Uses mkntfs to wipe
+  bool WipeNtfs();
+
+  // Uses rm -rf to wipe but does not wipe /data/media
+  bool WipeDataWithoutWipingMedia();
+
+  // Uses rm -rf to wipe but does not wipe /data/media
+  bool WipeDataWithoutWipingMediaFunc(const std::filesystem::path& parent);
+
+  // Backs up using tar for file systems
+  bool BackupTar(PartitionSettings* part_settings, pid_t* tar_fork_pid);
+
+  // Backs up using raw read/write for emmc memory types
+  bool BackupImage(PartitionSettings* part_settings);
+
+  bool RawReadWrite(const PartitionSettings* part_settings) const;
+
+  std::string GetRestoreFileSystem(PartitionSettings* part_settings);
+
+  // Returns the file system that was in place at the time of the backup
+  // Restore using tar for file systems
+  bool RestoreTar(PartitionSettings* part_settings);
+
+  // Restore using dd for images
+  bool RestoreImage(PartitionSettings* part_settings);
+
+  // Get Partition size, used, and free space using statfs
+  bool GetSizeViaStatfs(bool display_error);
+
+  // Get Partition size, used, and free space using df command
+  bool GetSizeViaDf(bool display_error);
+
+  // Creates a directory if it doesn't already exist
+  static bool MakeDir(const std::string& path, bool display_error);
+
+  // Recreates the .android_secure folder
+  void RecreateAndSecFolder();
+
+  bool MountStorageRetry(bool display_error);
+
+  // Tries multiple times with a half second delay to mount a device in case storage is slow to mount
+  // Determines if a file is in sparse image format
+  static bool IsSparseImage(const std::string& Filename);
+
+  // Flashes a sparse image using libsparse
+  [[nodiscard]] bool FlashSparseImage(const std::string& Filename) const;
+
+  // Adds an exclusion for path to both the backup and wipe exclusion lists
+  void ExcludeAll(const std::string& path);
+
+  // Indicates that the partition can be mounted
+  bool can_be_mounted_;
+  // Indicates that the partition can be wiped
+  bool can_be_wiped_;
+  // Indicates that the partition will show up in the backup list
+  bool can_be_backed_up_;
+  // Indicates that the partition will always be formatted w/ "rm -rf *"
+  bool use_rm_rf_;
+  // Indicates that this partition is wiped during a factory reset
+  bool wipe_during_factory_reset_;
+  // Indicates that the wipe can be user initiated in the GUI system
+  bool wipe_available_in_gui_;
+  bool is_sub_partition_;
+  // Indicates that this partition is a sub-partition of another partition (e.g. datadata is a sub-partition of data)
+  // Indicates that this partition has a sub-partition
+  bool has_sub_partition_;
+  std::string sub_partition_of_;
+  // Indicates which partition is the parent partition of this partition (e.g. /data is the parent partition of /datadata)
+  // Symlink path (e.g. /data/media)
+  std::string symlink_path_;
+  // /sdcard could be the symlink mount point for /data/media
+  std::string symlink_mount_point_;
+  // Mount point for this partition (e.g. /system or /data)
+  std::string mount_point_;
+  // Path for backup
+  std::string backup_path_;
+  // If the block device contains an asterisk, we set this flag
+  bool wildcard_block_device_;
+  std::string sysfs_entry_;
+  // For v2 fstab, if the "block device" starts with /devices then it is a sysfs entry that is handled by uevents
+  // Block device (e.g. /dev/block/mmcblk1p1)
+  std::string primary_block_device_;
+  // Alternate block device (e.g. /dev/block/mmcblk1)
+  std::string alternate_block_device_;
+  // Decrypted block device available after decryption
+  std::string decrypted_block_device_;
+  bool removable_;
+  // Indicates if this partition is removable -- affects how often we check overall size, if present, etc.
+  int length_;
+  // Used by make_ext4fs to leave free space at the end of the partition block for things like a crypto footer
+  // Overall size of the partition
+  uint64_t size_;
+  // Overall used space
+  uint64_t used_;
+  // Overall free space
+  uint64_t free_;
+  uint64_t backup_size_;
+  // Backup size -- may be different than used space especially when /data/media is present
+  // backup_size_ is the statfs figure, not the walked one
+  bool backup_size_provisional_;
+  // Restore size of the current restore operation
+  uint64_t restore_size_ = 0;
+  bool can_be_encrypted_;
+  // This partition might be encrypted, affects error handling, can only be true if crypto support is compiled in
+  bool is_encrypted_;
+  // This partition is thought to be encrypted -- it wouldn't mount for some reason, only available with crypto support
+  // This partition has successfully been decrypted
+  bool is_decrypted_;
+  // File Based Encryption is present
+  bool is_fbe_;
+  bool mount_to_decrypt_;
+  // Mount this partition during decrypt (/vendor, /firmware, etc in case we need proprietary libs or firmware files)
+  // Display name for the GUI
+  std::string display_name_;
+  // Backup name -- used for backup filenames
+  std::string backup_name_;
+  // Name displayed in the partition list for storage selection
+  std::string storage_name_;
+  // Actual backup filename
+  std::string backup_file_name_;
+  // Method used for backup
+  BackupMethod backup_method_;
+  // Indicates if this item can be encrypted during backup
+  bool can_encrypt_backup_;
+  // Indicates if we will use userdata encryption splitting on an encrypted backup
+  bool use_userdata_encryption_;
+  // Indicates the presence of .android_secure on this partition
+  bool has_android_secure_;
+
+  // Indicates if this partition is used for storage for backup, restore, and installing zips
+  bool is_storage_;
+
+  bool is_settings_storage_;
+  // Indicates that this storage partition is the location of the .twrps settings file and the location that is used for custom themes
+  std::string storage_path_;
+  // Indicates the path to the storage -- root indicates mount point, media/ indicates e.g. /data/media
+  // File system from the recovery.fstab
+  std::string fstab_file_system_;
+  // File system flags from recovery.fstab
+  int mount_flags_;
+  // File system options from recovery.fstab
+  std::string mount_options_;
+  // Block size for formatting
+  uint64_t format_block_size_;
+  // Ignore blkid results due to superblocks lying to us on certain devices / partitions
+  bool ignore_blkid_;
+
+  // Indicates if this partition can have images flashed to it via the GUI
+  bool can_flash_img_;
+  // Only mount this partition as read-only
+  bool mount_read_only_;
+  // Indicates that this partition is for adopted storage (android_expand)
+  bool is_adopted_storage_;
+  // Partition has A/B slots
+  bool slot_select_;
+  // Exclusions for file based backups
+  TWExclude backup_exclusions;
+  // Exclusions for file based wipes (data/media devices only)
+  TWExclude wipe_exclusions;
+  // Metadata key directory needed for mounting FBE encrypted data partitions using metadata encryption
+  std::string key_directory_;
+
+  bool needs_fs_compress_;
+  bool needs_metadata_csum_;
+
+  struct PartitionFsFlagsStruct {
+    // This struct is used to store mount flags and options for different file systems for the same partition
+    std::string file_system;
+    int mount_flags;
+    std::string mount_options;
+  };
+
+  std::vector<PartitionFsFlagsStruct> fs_flags;
+  // This vector stores mount flags and options for different file systems for the same partition
+  // States whether partition should be loaded from the super partition
+  bool is_super_;
+
+  friend class TWPartitionManager;
+  friend class DataManager;
+  friend class GUIPartitionList;
+  friend class GUIAction;
+  friend class PageManager;
 };
 
-struct users_struct {
-    std::string userId;
-    std::string userName;
-    int type;
-    bool isDecrypted;
+struct UsersStruct {
+  int user_id = 0;
+  std::string user_name;
+  int type;
+  bool is_decrypted;
 };
 
 class TWPartitionManager {
 public:
-    // Constructor for TWPartitionManager
-    TWPartitionManager();
+  // Constructor for TWPartitionManager
+  TWPartitionManager();
 
-    ~TWPartitionManager() {
-    }
+  ~TWPartitionManager() = default;
 
-    int Process_Fstab(std::string Fstab_Filename, bool Display_Error, bool recovery_mode); // Parses the fstab files
-    void Setup_Fstab_Partitions(bool Display_Error); // Populates the partitions
-    int Write_Fstab(); // Creates /etc/fstab file that's used by the command line for mount commands
-    void Decrypt_Data(); // Decrypt Data if enabled
-    void Output_Partition_Logging(); // Outputs partition information to the log
-    void Output_Partition(TWPartition *Part); // Outputs partition details to the log
-    int Mount_By_Path(std::string Path, bool Display_Error); // Mounts partition based on path (e.g. /system)
-    int UnMount_By_Path(std::string Path, bool Display_Error, int flags = 0); // Unmounts partition based on path
-    int Is_Mounted_By_Path(std::string Path); // Checks if partition is mounted based on path
-    int Mount_Current_Storage(bool Display_Error); // Mounts the current storage location
-    int Mount_Settings_Storage(bool Display_Error); // Mounts the settings file storage location (usually internal)
-    TWPartition *Find_Partition_By_Path(const std::string &Path); // Returns a pointer to a partition based on path
-    TWPartition *Find_Partition_By_Block_Device(const std::string &Block_Device);
+  // Parses the fstab files
+  int ProcessFstab(std::string fstab_filename, bool display_error, bool recovery_mode);
 
-    // Returns a pointer to a partition based on block device
-    int Check_Backup_Name(const std::string &Backup_Name, bool Display_Error, bool Must_Be_Unique);
+  // Populates the partitions
+  void SetupFstabPartitions(bool display_error);
 
-    // Checks the current backup name to ensure that it is valid and optionally that a backup with that name doesn't already exist
-    bool Run_Backup(); // Initiates a backup in the current storage
-    int Run_Restore(const std::string &Restore_Name); // Restores a backup
-    void Set_Restore_Files(std::string Restore_Name);
+  // Creates /etc/fstab file that's used by the command line for mount commands
+  [[nodiscard]] int WriteFstab() const;
 
-    // Used to gather a list of available backup partitions for the user to select for a restore
-    int Wipe_By_Path(std::string Path); // Wipes a partition based on path
-    int Wipe_By_Path(std::string Path, std::string New_File_System); // Wipes a partition based on path
-    int Factory_Reset(); // Performs a factory reset
-    int Wipe_Dalvik_Cache(); // Wipes dalvik cache
-    int Wipe_Rotate_Data(); // Wipes rotation data --
-    int Wipe_Battery_Stats(); // Wipe battery stats -- /data/system/batterystats.bin
-    int Wipe_Android_Secure(); // Wipes android secure
-    int Format_Data(); // Really formats data on /data/media devices -- also removes encryption
-    int Wipe_Media_From_Data(); // Removes and recreates the media folder on /data/media devices
-    int Repair_By_Path(std::string Path, bool Display_Error); // Repairs a partition based on path
-    int Resize_By_Path(std::string Path, bool Display_Error); // Resizes a partition based on path
-    void Update_System_Details(bool Defer_Data_Size = false, bool Display_Error = true); // Updates fstab, file systems, sizes, etc.
-    void Process_Async_Data_Size(); // Applies a completed background data-size calculation
-    int Decrypt_Device(std::string Password, int user_id = 0); // Attempt to decrypt any encrypted partitions
-    void Mark_Data_Locked(); // Data was unmounted, so its fscrypt keys went with it
-    bool Storage_Name_In_Use(const std::string &Name); // Checks whether a partition is already showing this name
-    void Parse_Users(); // Parse FBE users
-    int usb_storage_enable(); // Enable USB storage mode
-    int usb_storage_disable(); // Disable USB storage mode
-    void Mount_All_Storage(); // Mounts all storage locations
-    void UnMount_Main_Partitions(); // Unmounts system and data if not data/media and boot if boot is mountable
-    int Partition_SDCard(); // Repartitions the sdcard
-    TWPartition *Get_Default_Storage_Partition(); // Returns a pointer to a default storage partition
-    int Check_Backup_Cancel(); // Returns the value of stop_backup
-    int Cancel_Backup(); // Signals partition backup to cancel
-    void Clean_Backup_Folder(std::string Backup_Folder); // Clean Backup Folder on Error
-    int Fix_Contexts();
+  // Decrypt Data if enabled
+  void DecryptData();
 
-    void Get_Partition_List(std::string ListType, std::vector<PartitionList> *Partition_List);
+  // Outputs partition information to the log
+  void OutputPartitionLogging() const;
 
-    int Fstab_Processed(); // Indicates if the fstab has been processed or not
-    void Output_Storage_Fstab();
+  // Outputs partition details to the log
+  static void OutputPartition(const TWPartition* part);
 
-    // Creates a /cache/recovery/storage.fstab file with a list of all potential storage locations for app use
-    bool Enable_MTP(); // Enables MTP
-    void Add_All_MTP_Storage(); // Adds all storage objects for MTP
-    bool Disable_MTP(); // Disables MTP
-    bool Add_MTP_Storage(std::string Mount_Point); // Adds or removes an MTP Storage partition
-    bool Add_MTP_Storage(unsigned int Storage_ID); // Adds or removes an MTP Storage partition
-    bool Remove_MTP_Storage(std::string Mount_Point); // Adds or removes an MTP Storage partition
-    bool Remove_MTP_Storage(unsigned int Storage_ID); // Adds or removes an MTP Storage partition
-    void Translate_Partition(const char *path, const char *resource_name, const char *default_value);
+  // Mounts partition based on path (e.g. /system)
+  [[nodiscard]] int MountByPath(const std::string& Path, bool display_error) const;
 
-    void Translate_Partition(const char *path, const char *resource_name, const char *default_value,
-                             const char *storage_resource_name, const char *storage_default_value);
+  // Unmounts partition based on path
+  [[nodiscard]] bool UnmountByPath(const std::string& path, bool display_error,
+                                   int flags = 0) const;
 
-    void Translate_Partition(const char *path, const char *resource_name, const char *default_value,
-                             const char *storage_resource_name, const char *storage_default_value,
-                             const char *backup_name, const char *backup_default);
+  // Checks if partition is mounted based on path
+  [[nodiscard]] int IsMountedByPath(const std::string& Path) const;
 
-    void Translate_Partition_Display_Names(); // Updates display names based on translations
-    void Remove_Partition_By_Path(std::string Path); // Removes / erases a partition entry from the partition list
-    bool Prepare_All_Super_Volumes(); // Prepare all known super volumes from super partition
-    bool Flash_Image(std::string &path, std::string &filename);
+  // Mounts the current storage location
+  [[nodiscard]] int MountCurrentStorage(bool display_error) const;
 
-    // Flashes an image to a selected partition from the partition list
-    bool Restore_Partition(PartitionSettings *part_settings); // Restore the partitions based on type
-    std::atomic_bool stop_backup;
+  // Mounts the settings file storage location (usually internal)
+  [[nodiscard]] int MountSettingsStorage(bool display_error) const;
 
-    void Override_Active_Slot(const std::string &Slot); // Override the active slot for repacking
-    void Set_Active_Slot(const std::string &Slot); // Sets the active slot to A or B
-    std::string Get_Active_Slot_Suffix(); // Returns active slot _a or _b
-    std::string Get_Active_Slot_Display(); // Returns active slot A or B for display purposes
-    std::string Get_Android_Root_Path(); // Returns path of ANDROID_ROOT environment variable
-    struct pollfd uevent_pfd; // Used for uevent code
-    void Remove_Uevent_Devices(const std::string &sysfs_path);
+  // Returns a pointer to a partition based on path
+  [[nodiscard]] TWPartition* FindPartitionByPath(const std::string& Path) const;
 
-    // Removes subpartitions from the Partitions vector for a matched uevent device
-    void Handle_Uevent(const Uevent_Block_Data &uevent_data); // Handle uevent data
-    void setup_uevent(); // Opens the uevent netlink socket
-    Uevent_Block_Data get_event_block_values(char *buf, int len);
+  // Returns a pointer to a partition based on block device
+  [[nodiscard]] TWPartition* FindPartitionByBlockDevice(const std::string& block_device) const;
 
-    // Scans the buffer from uevent data and loads the appropriate data into a Uevent_Block_Data struct for processing
-    void read_uevent(); // Reads uevent data into a buffer
-    void close_uevent(); // Closes the uevent netlink socket
-    void Add_Partition(TWPartition *Part); // Adds a new partition to the Partitions vector
-    std::string Get_Bare_Partition_Name(std::string Mount_Point);
+  // True if backup_name has valid length and characters, and (when must_be_unique) no
+  // backup folder with that name already exists.
+  [[nodiscard]] static bool IsBackupNameValid(const std::string& backup_name, bool display_error,
+                                              bool must_be_unique);
 
-    bool Prepare_Super_Volume(TWPartition *twrpPart); // Prepare logical super partition volume for mounting
-    std::string Get_Super_Partition(); // Get Super Partition block device path
-    void Setup_Super_Devices(); // Setup logical dm devices on super partition
-    bool Get_Super_Status(); // Return whether device has a super partition
-    void Setup_Super_Partition(); // Setup the super partition for backup and restore
-    bool Recreate_Logs_Dir(); // Recreate TWRP_AB_LOGS_DIR after wipe
-    std::vector<users_struct> *Get_Users_List(); // Returns pointer to list of users
-    void Set_Crypto_State(); // Sets encryption state for devices (ro.crypto.state)
-    int Set_Crypto_Type(const std::string &crypto_type);
+  // Initiates a backup in the current storage
+  bool RunBackup();
 
-    // Sets encryption type for FDE (block) and FBE (file) devices (ro.crypto.type)
-    void Unlock_Block_Partitions(); // Unlock all block devices after update_engine runs
-    bool Unmap_Super_Devices(); // Unmap super devices in TWRP
-    bool Check_Pending_Merges(); // Check and run pending merges on data for VAB devices
-    bool Disable_AVB2(bool Display_Info); // Disable AVB 2.0
+  // Restores a backup
+  [[nodiscard]] int RunRestore(const std::string& restore_name) const;
+
+  void SetRestoreFiles(const std::string& restore_name) const;
+
+  // Used to gather a list of available backup partitions for the user to select for a restore
+  // Wipes a partition based on path
+  [[nodiscard]] int WipeByPath(const std::string& Path) const;
+
+  // Wipes a partition based on path
+  [[nodiscard]] int WipeByPath(const std::string& Path, const std::string& new_file_system) const;
+
+  // Performs a factory reset
+  [[nodiscard]] int FactoryReset() const;
+
+  // Wipes dalvik cache
+  [[nodiscard]] int WipeDalvikCache() const;
+
+  // Wipes rotation data --
+  [[nodiscard]] int WipeRotateData() const;
+
+  // Wipe battery stats -- /data/system/batterystats.bin
+  [[nodiscard]] int WipeBatteryStats() const;
+
+  // Wipes android secure
+  [[nodiscard]] int WipeAndroidSecure() const;
+
+  // Really formats data on /data/media devices -- also removes encryption
+  int FormatData();
+
+  // Removes and recreates the media folder on /data/media devices
+  [[nodiscard]] int WipeMediaFromData() const;
+
+  // Repairs a partition based on path
+  [[nodiscard]] int RepairByPath(const std::string& Path, bool display_error) const;
+
+  // Resizes a partition based on path
+  [[nodiscard]] int ResizeByPath(const std::string& Path, bool display_error) const;
+
+  // Updates fstab, file systems, sizes, etc.
+  void UpdateSystemDetails(bool defer_data_size = false, bool display_error = true) const;
+
+  // Applies a completed background data-size calculation
+  void ProcessAsyncDataSize() const;
+
+  // Attempt to decrypt any encrypted partitions
+  int DecryptDevice(const std::string& Password, int user_id = 0);
+
+  // Data was unmounted, so its fscrypt keys went with it
+  void MarkDataLocked();
+
+  // Checks whether a partition is already showing this name
+  [[nodiscard]] bool StorageNameInUse(const std::string& Name);
+
+  // Parse FBE users
+  void ParseUsers();
+
+  // Enable USB storage mode
+  int UsbStorageEnable();
+
+  // Disable USB storage mode
+  int UsbStorageDisable();
+
+  // Mounts all storage locations
+  void MountAllStorage() const;
+
+  // Unmounts system and data if not data/media and boot if boot is mountable
+  void UnmountMainPartitions() const;
+
+  // Repartitions the sdcard
+  [[nodiscard]] int PartitionSdCard() const;
+
+  // Returns a pointer to a default storage partition
+  [[nodiscard]] TWPartition* GetDefaultStoragePartition() const;
+
+  // Returns the value of stop_backup
+  [[nodiscard]] int CheckBackupCancel() const;
+
+  // Signals partition backup to cancel
+  int CancelBackup();
+
+  // Clean Backup Folder on Error
+  static void CleanBackupFolder(const std::string& backup_folder);
+
+  [[nodiscard]] int FixContexts() const;
+
+  void GetPartitionList(const std::string& list_type,
+                        std::vector<PartitionList>* partition_list) const;
+
+  // Indicates if the fstab has been processed or not
+  [[nodiscard]] bool FstabProcessed() const;
+
+  void OutputStorageFstab() const;
+
+  // Creates a /cache/recovery/storage.fstab file with a list of all potential storage locations for app use
+  // Enables MTP
+  bool EnableMtp();
+
+  // Adds all storage objects for MTP
+  void AddAllMtpStorage() const;
+
+  // Disables MTP
+  bool DisableMtp();
+
+  // Adds or removes an MTP Storage partition
+  static bool AddMtpStorage(const std::string& mount_point);
+
+  // Adds or removes an MTP Storage partition
+  static bool AddMtpStorage(unsigned int storage_id);
+
+  // Adds or removes an MTP Storage partition
+  static bool RemoveMtpStorage(const std::string& mount_point);
+
+  // Adds or removes an MTP Storage partition
+  static bool RemoveMtpStorage(unsigned int storage_id);
+
+  static void TranslatePartition(const std::string& path, const std::string& resource_name,
+                                 const std::string& default_value);
+
+  static void TranslatePartition(const std::string& path, const std::string& resource_name,
+                                 const std::string& default_value,
+                                 const std::string& storage_resource_name,
+                                 const std::string& storage_default_value);
+
+  static void TranslatePartition(const std::string& path, const std::string& resource_name,
+                                 const std::string& default_value,
+                                 const std::string& storage_resource_name,
+                                 const std::string& storage_default_value,
+                                 const std::string& backup_name, const std::string& backup_default);
+
+  // Updates display names based on translations
+  void TranslatePartitionDisplayNames() const;
+
+  // Removes / erases a partition entry from the partition list
+  void RemovePartitionByPath(const std::string& Path);
+
+  // Prepare all known super volumes from super partition
+  bool PrepareAllSuperVolumes();
+
+  [[nodiscard]] bool FlashImage(const std::string& path, const std::string& filename) const;
+
+  // Flashes an image to a selected partition from the partition list
+  // Restore the partitions based on type
+  bool RestorePartition(PartitionSettings* part_settings) const;
+
+  std::atomic_bool stop_backup;
+
+  // Override the active slot for repacking
+  void OverrideActiveSlot(const std::string& slot);
+
+  // Sets the active slot to A or B
+  void SetActiveSlot(const std::string& slot);
+
+  // Returns active slot _a or _b
+  [[nodiscard]] std::string GetActiveSlotSuffix() const;
+
+  // Returns active slot A or B for display purposes
+  std::string GetActiveSlotDisplay();
+
+  // Returns path of ANDROID_ROOT environment variable
+  static std::string GetAndroidRootPath();
+
+  // Used for uevent code
+  pollfd uevent_pfd{};
+
+  void RemoveUeventDevices(const std::string& sysfs_path);
+
+  // Removes subpartitions from the partitions_ vector for a matched uevent device
+  // Handle uevent data
+  void HandleUevent(const UeventBlockData& uevent_data);
+
+  // Opens the uevent netlink socket
+  void SetupUevent();
+
+  static UeventBlockData GetEventBlockValues(char* buf, int len);
+
+  // Scans the buffer from uevent data and loads the appropriate data into a UeventBlockData struct for processing
+  // Reads uevent data into a buffer
+  void ReadUevent() const;
+
+  // Closes the uevent netlink socket
+  void CloseUevent();
+
+  // Adds a new partition to the partitions_ vector
+  void AddPartition(TWPartition* part);
+
+  static std::string GetBarePartitionName(const std::string& mountpoint);
+
+  // Prepare logical super partition volume for mounting
+  bool PrepareSuperVolume(TWPartition* twrpPart);
+
+  // Get Super Partition block device path
+  static std::string GetSuperPartition();
+
+  // Setup logical dm devices on super partition
+  static void SetupSuperDevices();
+
+  // Return whether device has a super partition
+  [[nodiscard]] static bool GetSuperStatus();
+
+  // Setup the super partition for backup and restore
+  void SetupSuperPartition();
+
+  // Recreate TWRP_AB_LOGS_DIR after wipe
+  static bool RecreateLogsDir();
+
+  // Returns pointer to list of users
+  std::vector<UsersStruct>* GetUsersList();
+
+  // Sets encryption state for devices (ro.crypto.state)
+  static void SetCryptoState();
+
+  static int SetCryptoType(const std::string& crypto_type);
+
+  // Sets encryption type for FDE (block) and FBE (file) devices (ro.crypto.type)
+  // Unlock all block devices after update_engine runs
+  static void UnlockBlockPartitions();
+
+  // Unmap super devices in TWRP
+  bool UnmapSuperDevices();
+
+  // Check and run pending merges on data for VAB devices
+  bool CheckPendingMerges();
+
+  // Disable AVB 2.0
+  static bool DisableAvb2(bool display_info);
 
 private:
-    void Setup_Settings_Storage_Partition(TWPartition *Part); // Sets up settings storage
-    void Setup_Android_Secure_Location(TWPartition *Part); // Sets up .android_secure if needed
-    bool Backup_Partition(PartitionSettings *part_settings); // Backup the partitions based on type
-    TWPartition *Find_Partition_By_MTP_Storage_ID(unsigned int Storage_ID);
+  // Matches a partition by mount point or symlink mount point (e.g. /sdcard);
+  // member access relies on the TWPartition friendship
+  static bool MatchesPath(const TWPartition* p, const std::string& path);
 
-    // Returns a pointer to a partition based on MTP Storage ID
-    bool Add_Remove_MTP_Storage(TWPartition *Part, int message_type); // Adds or removes an MTP Storage partition
-    TWPartition *Find_Next_Storage(std::string Path, bool Exclude_Data_Media);
+  // Sets up settings storage
+  static void SetupSettingsStoragePartition(const TWPartition* part);
 
-    int Open_Lun_File(std::string Partition_Path, std::string Lun_File);
+  // Sets up .android_secure if needed
+  static void SetupAndroidSecureLocation(TWPartition* part);
 
-    void Post_Decrypt(const std::string &Block_Device); // Completes various post-decrypt tasks
-    void Coldboot_Scan(std::span<const std::string> sysfs_entries, const std::filesystem::path &Path, int depth);
+  // Backup the partitions based on type
+  bool BackupPartition(PartitionSettings* part_settings);
 
-    // Scans subfolders to find matches to the paths stored in sysfs_entries so we can trigger the uevent system to "re-add" devices
-    void Coldboot(); // Starts the scan of the /sys/block folder
-    bool Prepare_Empty_Folder(const std::string &Folder);
+  [[nodiscard]] TWPartition* FindPartitionByMtpStorageId(unsigned int storage_id) const;
 
-    // Creates an empty folder at Folder. If the folder already exists, the folder is deleted, then created
+  // Returns a pointer to a partition based on MTP Storage ID
+  // Adds or removes an MTP Storage partition
+  bool AddRemoveMtpStorage(const TWPartition* part, int message_type) const;
+
+  [[nodiscard]] TWPartition*
+  FindNextStorage(const std::string& Path, bool exclude_data_media) const;
+
+  [[nodiscard]] int OpenLunFile(const std::string& partition_path,
+                                const std::string& lun_file) const;
+
+  // Completes various post-decrypt tasks
+  void PostDecrypt(const std::string& block_device) const;
+
+  static void ColdbootScan(std::span<const std::string> sysfs_entries,
+                           const std::filesystem::path& path,
+                           int depth);
+
+  // Scans subfolders to find matches to the paths stored in sysfs_entries so we can trigger the uevent system to "re-add" devices
+  // Starts the scan of the /sys/block folder
+  void Coldboot() const;
+
+  static bool PrepareEmptyFolder(const std::string& Folder);
+
+  // Creates an empty folder at Folder. If the folder already exists, the folder is deleted, then created
 #ifdef TW_HAS_MTP
-    pid_t mtppid;
+  pid_t mtp_pid_ = 0;
 #endif
-    bool mtp_was_enabled;
-    int mtp_write_fd;
-    pid_t tar_fork_pid; // PID of twrpTar fork
-    std::string original_ramdisk_format; // Ramdisk format of boot partition
-    std::string repacked_ramdisk_format; // Ramdisk format of boot image to repack from
-    void Mark_User_Decrypted(int userID); // Marks given user ID in Users_List as decrypted
-    void Check_Users_Decryption_Status(); // Checks to see if all users are decrypted
+  bool mtp_was_enabled;
+  int mtp_write_fd;
+  // PID of twrpTar fork
+  pid_t tar_fork_pid = 0;
+  // Ramdisk format of boot partition
+  std::string original_ramdisk_format;
 
-    std::vector<TWPartition *> Partitions; // Vector list of all partitions
-    std::string Active_Slot_Display; // Current Active Slot (A or B) for display purposes
-    std::vector<users_struct> Users_List; // List of FBE users
-    std::vector<std::string> Super_Partition_List; // Display value for super partitions
+  // Marks given user ID in users_list_ as decrypted
+  void MarkUserDecrypted(int user_id);
+
+  // Checks to see if all users are decrypted
+  void CheckUsersDecryptionStatus() const;
+
+  // Vector list of all partitions
+  std::vector<TWPartition*> partitions_;
+  // Current Active Slot (A or B) for display purposes
+  std::string active_slot_display_;
+  // List of FBE users
+  std::vector<UsersStruct> users_list_;
+  // Display value for super partitions
+  std::vector<std::string> super_partition_list_;
 };
 
 extern TWPartitionManager PartitionManager;
 
-#endif // __TWRP_Partition_Manager
+#endif // TWRP_PARTITION_MANAGER

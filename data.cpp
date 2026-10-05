@@ -122,11 +122,11 @@ int DataManager::LoadValues(const std::string& filename) {
 
   pthread_mutex_unlock(&values_lock_);
   const std::string current = GetCurrentStoragePath();
-  TWPartition* Part = PartitionManager.Find_Partition_By_Path(current);
-  if (!Part) Part = PartitionManager.Get_Default_Storage_Partition();
-  if (Part && current != Part->Storage_Path && Part->Mount(false)) {
-    LOGINFO("LoadValues setting storage path to '%s'\n", Part->Storage_Path.c_str());
-    SetValue("tw_storage_path", Part->Storage_Path);
+  TWPartition* part = PartitionManager.FindPartitionByPath(current);
+  if (!part) part = PartitionManager.GetDefaultStoragePartition();
+  if (part && current != part->storage_path_ && part->Mount(false)) {
+    LOGINFO("LoadValues setting storage path to '%s'\n", part->storage_path_.c_str());
+    SetValue("tw_storage_path", part->storage_path_);
   } else {
     SetBackupFolder();
   }
@@ -141,7 +141,7 @@ int DataManager::SaveValues() {
   if (kBackingFile.empty()) return -1;
 
   //string mount_path = GetSettingsStoragePath();
-  //PartitionManager.Mount_By_Path(mount_path.c_str(), 1);
+  //PartitionManager.MountByPath(mount_path.c_str(), 1);
 
   //mPersist.SetFile(mBackingFile);
   persist_.SetFile(fs::path(TW_PERSIST_DIR) / TW_SETTINGS_FILE);
@@ -372,7 +372,7 @@ void DataManager::UpdateTimezoneEnvironment() {
 
 void DataManager::SetBackupFolder() {
   const auto storage = GetCurrentStoragePath();
-  const TWPartition* partition = PartitionManager.Find_Partition_By_Path(storage);
+  const TWPartition* partition = PartitionManager.FindPartitionByPath(storage);
   auto backup_path = fs::path(storage) / fs::path(TWFunc::CheckForTwrpFolder()).relative_path() /
                      "BACKUPS";
 
@@ -383,14 +383,14 @@ void DataManager::SetBackupFolder() {
   LOGINFO("Backup folder set to '%s'\n", backup_path.c_str());
   SetValue(TW_BACKUPS_FOLDER_VAR, backup_path, 0);
   if (partition) {
-    SetValue("tw_storage_display_name", partition->Storage_Name);
-    SetValue("tw_storage_free_size", UnitConversion::FormatBytes(partition->Free));
+    SetValue("tw_storage_display_name", partition->storage_name_);
+    SetValue("tw_storage_free_size", UnitConversion::FormatBytes(partition->free_));
     std::string zip_path, zip_root, storage_path;
     GetValue(TW_ZIP_LOCATION_VAR, zip_path);
-    if (partition->Has_Data_Media && !partition->Symlink_Mount_Point.
+    if (partition->has_data_media_ && !partition->symlink_mount_point_.
         empty())
-      storage_path = partition->Symlink_Mount_Point;
-    else storage_path = partition->Storage_Path;
+      storage_path = partition->symlink_mount_point_;
+    else storage_path = partition->storage_path_;
     if (zip_path.size() < storage_path.size()) {
       SetValue(TW_ZIP_LOCATION_VAR, storage_path);
     } else {
@@ -402,7 +402,7 @@ void DataManager::SetBackupFolder() {
       }
     }
   } else {
-    if (PartitionManager.Fstab_Processed() != 0) {
+    if (PartitionManager.FstabProcessed()) {
       LOGINFO("Storage partition '%s' not found\n", backup_path.c_str());
       gui_err("unable_locate_storage=Unable to locate storage device.");
     }
@@ -473,8 +473,8 @@ void DataManager::SetDefaultValues() {
 #endif
 
   if (const TWPartition* store = PartitionManager.
-      Get_Default_Storage_Partition())
-    persist_["tw_storage_path"] = store->Storage_Path;
+      GetDefaultStoragePartition())
+    persist_["tw_storage_path"] = store->storage_path_;
   else persist_["tw_storage_path"] = "/";
 
 #ifdef TW_FORCE_CPUINFO_FOR_DEVICE_ID
@@ -910,7 +910,7 @@ void DataManager::OutputVersion() {
   std::error_code ec;
 
   if (log_dir == CACHE_LOGS_DIR) {
-    if (!PartitionManager.Mount_By_Path(CACHE_LOGS_DIR, false)) {
+    if (!PartitionManager.MountByPath(CACHE_LOGS_DIR, false)) {
       LOGINFO("Unable to mount '%s' to write version number.\n", log_dir.c_str());
       return;
     }
@@ -945,7 +945,7 @@ void DataManager::OutputVersion() {
   if (ec) {
     LOGINFO("Unable to copy recovery.fstab: %s\n", ec.message().c_str());
   }
-  PartitionManager.Output_Storage_Fstab();
+  PartitionManager.OutputStorageFstab();
   sync();
   LOGINFO("Version number saved to '%s'\n", version_path.c_str());
 }
@@ -959,10 +959,10 @@ void DataManager::ReadSettingsFile() {
   GetValue(TW_HAS_DATA_MEDIA, has_data_media);
 
   /*
-  if (!PartitionManager.Mount_Settings_Storage(false))
+  if (!PartitionManager.MountSettingsStorage(false))
   {
     usleep(500000);
-    if (!PartitionManager.Mount_Settings_Storage(false))
+    if (!PartitionManager.MountSettingsStorage(false))
       gui_msg(Msg(msg::kError, "unable_to_mount=Unable to mount {1}")(settings_file));
   }
 
@@ -972,7 +972,7 @@ void DataManager::ReadSettingsFile() {
   LOGINFO("Attempt to load settings from settings file...\n");
   LoadValues(settings_file);
   OutputVersion();
-  PartitionManager.Mount_All_Storage();
+  PartitionManager.MountAllStorage();
   UpdateTimezoneEnvironment();
   TWFunc::SetBrightness(GetStrValue("tw_brightness"));
 }
