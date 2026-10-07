@@ -61,6 +61,7 @@
 #include "data.hpp"
 #include "exclude.hpp"
 #include "fixContexts.hpp"
+#include "fstab/fstab_parser.hpp"
 #include "partitions.hpp"
 #include "progresstracking.hpp"
 #include "set_metadata.h"
@@ -304,150 +305,154 @@ static void ProcessKeymasterVersion(const TWPartition* ven, const bool display_e
   android::base::SetProperty(TW_KEYMASTER_VERSION_PROP, version);
 }
 
-int TWPartitionManager::ProcessFstab(std::string fstab_filename, const bool display_error,
-                                     const bool recovery_mode) {
+// Parses /etc/twrp.flags into a mount-point-keyed FlagsMap.
+static std::map<std::string, FlagsMap> LoadTwrpFlags() {
   std::map<std::string, FlagsMap> twrp_flags;
-  bool parse_userdata = false;
-
-  if (GetSuperStatus()) SetupSuperDevices();
-
-  auto parse_twrp_flags = [&twrp_flags] {
-    std::ifstream f("/etc/twrp.flags");
-    if (!f) return;
-    LOGINFO("Reading /etc/twrp.flags\n");
-    std::string line;
-    while (std::getline(f, line)) {
-      FlagsMap lf;
-      lf.fstab_line = line;
-      std::vector<std::string> tokens;
-      for (size_t i = 0; i < line.size();) {
-        while (i < line.size() && line[i] <= 32) i++;
-        size_t start = i;
-        while (i < line.size() && line[i] > 32) i++;
-        if (i > start) tokens.push_back(line.substr(start, i - start));
-      }
-      if (!tokens.empty()) {
-        lf.file_system = tokens[0];
-        if (tokens.size() > 1) lf.primary_block_device = tokens[1];
-        for (const auto& tok : tokens | std::views::drop(2)) {
-          if (tok[0] == '/') lf.alternate_block_device = tok;
-          else if (tok.size() > 6 && tok.starts_with("flags=")) {
-            lf.flags = tok;
-            break;
-          }
-        }
-      }
-      twrp_flags[tokens.empty() ? std::string{} : tokens[0]] = lf;
+  const auto result = twrp::fstab::ParseTwrpFlagsFromFile("/etc/twrp.flags");
+  if (!result.Ok()) return twrp_flags;
+  LOGINFO("Reading /etc/twrp.flags\n");
+  for (const auto& entry : result.fstab) {
+    FlagsMap lf;
+    lf.file_system = entry.fs_type;
+    lf.primary_block_device = entry.blk_device;
+    lf.alternate_block_device = entry.blk_device2;
+    lf.fstab_line = entry.mount_point + ' ' + entry.fs_type + ' ' + entry.blk_device;
+    if (!entry.blk_device2.empty()) lf.fstab_line += ' ' + entry.blk_device2;
+    if (entry.length != 0) lf.fstab_line += " length=" + std::to_string(entry.length);
+    if (!entry.twrp_flags.raw_flags.empty()) {
+      lf.flags = "flags=" + entry.twrp_flags.raw_flags;
+      lf.fstab_line += " flags=" + entry.twrp_flags.raw_flags;
     }
-  };
-  parse_twrp_flags();
+    twrp_flags[entry.mount_point] = std::move(lf);
+  }
+  return twrp_flags;
+}
 
-  TWPartition *data = nullptr, *meta = nullptr, *ven = nullptr, *odm = nullptr;
 
-  auto parse_fstab_file = [&](const std::string& fname) -> bool {
-    std::ifstream f(fname);
-    if (!f && !parse_userdata) {
-      LOGERR("Critical Error: Unable to open fstab at '%s'.\n", fname.c_str());
-      return false;
-    }
-    LOGINFO("Reading %s\n", fname.c_str());
-    std::string line;
-    while (std::getline(f, line)) {
-      if (line.find("swap") != std::string::npos) continue; // Skip swap in recovery
-      if (line.starts_with('#')) continue;
-      if (parse_userdata) {
-        if (line.find("/metadata") != std::string::npos && line.find("/data") ==
-            std::string::npos) {
-          if (meta) {
-            std::erase(partitions_, meta);
-            delete meta;
-            meta = nullptr;
-          }
-        } else if (line.find("/data") != std::string::npos) {
-          if (data) {
-            std::erase(partitions_, data);
-            delete data;
-            data = nullptr;
-          }
-        } else {
-          continue;
-        }
-      }
-
-      auto partition = std::make_unique<TWPartition>();
-      bool keep = partition->ProcessFstabLine(line.c_str(), display_error,
-                                              parse_userdata ? nullptr : &twrp_flags);
-      if (keep) {
-        if (partition->mount_point_ == "/data") data = partition.get();
-        if (partition->mount_point_ == "/metadata") meta = partition.get();
-        if (partition->is_super_ && !PrepareSuperVolume(partition.get())) keep = false;
-      }
-      if (keep) partitions_.push_back(partition.release());
-    }
-    return true;
-  };
-
-  bool need_vendor_pass = false;
-  do {
-    if (!parse_fstab_file(fstab_filename)) return false;
-
-    if (!parse_userdata && !twrp_flags.empty()) {
-      LOGINFO("Processing remaining twrp.flags\n");
-      // Add any items from twrp.flags that did not exist in the recovery.fstab
-      for (auto& [mount_point, line_flags] : twrp_flags) {
-        if (FindPartitionByPath(mount_point) == nullptr) {
-          // The unique_ptr frees the partition when the fstab line is rejected
-          if (auto partition = std::make_unique<TWPartition>();
-            partition->ProcessFstabLine(line_flags.fstab_line.c_str(), display_error, nullptr))
-            partitions_.push_back(partition.release());
-        }
-      }
-    }
-
-#ifdef TW_LOAD_VENDOR_MODULES
-    KernelModuleLoader::LoadVendorModules();
-#endif
-
-    ven = PartitionManager.FindPartitionByPath("/vendor");
-    odm = PartitionManager.FindPartitionByPath("/odm");
-
-    need_vendor_pass = false;
-    if (recovery_mode && !parse_userdata) {
-      if (ven) ven->Mount(display_error);
-      if (odm) odm->Mount(display_error);
-
-      ProcessResetProps(ven, odm);
-      parse_userdata = true;
 
 #ifndef TW_SKIP_ADDITIONAL_FSTAB
-      // Now Fetch the additional fstab
-      if (TWFunc::FindFstab(fstab_filename)) {
-        LOGINFO("Fstab: %s\n", fstab_filename.c_str());
-        TWFunc::CopyFile(fstab_filename, additional_fstab, 0600, false);
-        fstab_filename = additional_fstab;
-        android::base::SetProperty("fstab.additional", "1");
-        need_vendor_pass = true;
+// Copies the vendor fstab to /etc/additional.fstab and switches fstab_filename
+// to it; the return value asks the caller for one more, vendor fstab pass.
+static bool FetchAdditionalFstab(std::string* fstab_filename) {
+  if (!TWFunc::FindFstab(*fstab_filename)) {
+    LOGINFO("Unable to parse vendor fstab\n");
+    return false;
+  }
+  LOGINFO("Fstab: %s\n", fstab_filename->c_str());
+  TWFunc::CopyFile(*fstab_filename, additional_fstab, 0600, false);
+  *fstab_filename = additional_fstab;
+  android::base::SetProperty("fstab.additional", "1");
+  return true;
+}
+#endif
+
+bool TWPartitionManager::ProcessFstabFile(const std::string& fstab_filename,
+                                          const bool parse_userdata, const bool display_error,
+                                          std::map<std::string, FlagsMap>& twrp_flags) {
+  // Existence probe; the parser re-opens and reads the file.
+  if (!parse_userdata && !std::ifstream(fstab_filename)) {
+    LOGERR("Critical Error: Unable to open fstab at '%s'.\n", fstab_filename.c_str());
+    return false;
+  }
+  LOGINFO("Reading %s\n", fstab_filename.c_str());
+  const auto result = twrp::fstab::ParseFstabFromFile(fstab_filename);
+
+  // The userdata pass replaces /data and /metadata wholesale.
+  const auto erase_partition = [this](const std::string& mount_point) {
+    for (auto it = partitions_.begin(); it != partitions_.end();) {
+      if ((*it)->mount_point_ == mount_point) {
+        delete *it;
+        it = partitions_.erase(it);
       } else {
-        LOGINFO("Unable to parse vendor fstab\n");
+        ++it;
       }
     }
-    if (!need_vendor_pass)
-      LOGINFO("Done processing fstab files\n");
-#else
+  };
+
+  for (const auto& entry : result.fstab) {
+    if (entry.fs_type == "swap") continue; // Skip swap in recovery
+    if (parse_userdata) {
+      if (entry.mount_point == "/metadata") {
+        erase_partition("/metadata");
+      } else if (entry.mount_point == "/data") {
+        erase_partition("/data");
+      } else {
+        continue;
+      }
+    }
+
+    // Rebuild the fstab2 line with the flag columns verbatim so
+    // ProcessFstabLine sees the original tokens.
+    const std::string line = entry.blk_device + ' ' + entry.mount_point + ' ' +
+        entry.fs_type + ' ' + entry.raw_mnt_flags + ' ' + entry.raw_fsmgr_flags;
+    auto partition = std::make_unique<TWPartition>();
+    bool keep = partition->ProcessFstabLine(line.c_str(), display_error,
+                                            parse_userdata ? nullptr : &twrp_flags);
+    if (keep && partition->is_super_ && !PrepareSuperVolume(partition.get())) keep = false;
+    if (keep) partitions_.push_back(partition.release());
+  }
+  return true;
+}
+
+void TWPartitionManager::AddRemainingTwrpFlags(const std::map<std::string, FlagsMap>& twrp_flags,
+                                               const bool display_error) {
+  if (twrp_flags.empty()) return;
+  LOGINFO("Processing remaining twrp.flags\n");
+  // Add any items from twrp.flags that did not exist in the recovery.fstab
+  for (const auto& [mount_point, line_flags] : twrp_flags) {
+    if (FindPartitionByPath(mount_point) != nullptr) continue;
+    // The unique_ptr frees the partition when the fstab line is rejected
+    if (auto partition = std::make_unique<TWPartition>();
+      partition->ProcessFstabLine(line_flags.fstab_line.c_str(), display_error, nullptr))
+      partitions_.push_back(partition.release());
+  }
+}
+
+int TWPartitionManager::ProcessFstab(std::string fstab_filename, const bool display_error,
+                                     const bool recovery_mode) {
+  if (GetSuperStatus()) SetupSuperDevices();
+
+  auto twrp_flags = LoadTwrpFlags();
+
+  if (!ProcessFstabFile(fstab_filename, false, display_error, twrp_flags)) return false;
+  AddRemainingTwrpFlags(twrp_flags, display_error);
+
+  TWPartition* ven = FindPartitionByPath("/vendor");
+  TWPartition* odm = FindPartitionByPath("/odm");
+
+  if (recovery_mode) {
+    if (ven) ven->Mount(display_error);
+    if (odm) odm->Mount(display_error);
+
+    ProcessResetProps(ven, odm);
+
+#ifdef TW_SKIP_ADDITIONAL_FSTAB
     LOGINFO("Skipping Additional Fstab Processing\n");
     android::base::SetProperty("fstab.additional", "0");
+#else
+    // Vendor fstab pass: replaces the /data and /metadata entries.
+    if (FetchAdditionalFstab(&fstab_filename)) {
+      if (!ProcessFstabFile(fstab_filename, true, display_error, twrp_flags)) return false;
+      ven = FindPartitionByPath("/vendor");
+      odm = FindPartitionByPath("/odm");
     }
 #endif
-  } while (need_vendor_pass);
+
+    ProcessKeymasterVersion(ven, false);
+  }
+  LOGINFO("Done processing fstab files\n");
+
+#ifdef TW_LOAD_VENDOR_MODULES
+  KernelModuleLoader::LoadVendorModules();
+#endif
 
   if (odm) odm->Unmount(display_error);
-  if (recovery_mode) ProcessKeymasterVersion(ven, false);
   if (ven) ven->Unmount(display_error);
 
   return true;
 }
 
-void TWPartitionManager::SetupFstabPartitions(bool display_error) {
+void TWPartitionManager::SetupFstabPartitions(const bool display_error) {
   TWPartition* settings_partition = nullptr;
   TWPartition* andsec_partition = nullptr;
   unsigned int storageid = 1 << 16;

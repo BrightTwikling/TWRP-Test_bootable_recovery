@@ -859,6 +859,15 @@ public:
 
   static std::string GetBarePartitionName(const std::string& mountpoint);
 
+  // One pass over an fstab file, creating a partition per entry; the
+  // parse_userdata pass replaces /data and /metadata from the vendor fstab
+  bool ProcessFstabFile(const std::string& fstab_filename, const bool parse_userdata,
+                        const bool display_error, std::map<std::string, FlagsMap>& twrp_flags);
+
+  // Adds twrp.flags entries whose mount point has no partition yet
+  void AddRemainingTwrpFlags(const std::map<std::string, FlagsMap>& twrp_flags,
+                             const bool display_error);
+
   // Prepare logical super partition volume for mounting
   bool PrepareSuperVolume(TWPartition* twrpPart);
 

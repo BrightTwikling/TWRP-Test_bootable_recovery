@@ -1491,7 +1491,16 @@ bool TWPartition::Unmount(const bool display_error, const int flags) const {
   if (!symlink_mount_point_.empty()) umount2(symlink_mount_point_.c_str(), flags);
 
   // Capture errno before IsMounted()'s stat() clobbers it.
-  const int umount_err = umount2(mount_point_.c_str(), flags) != 0 ? errno : 0;
+  int umount_err = umount2(mount_point_.c_str(), flags) != 0 ? errno : 0;
+  // EBUSY is almost always a process holding open files under the mount;
+  // kill the holders (recovery itself is excluded) and retry once.
+  if (IsMounted() && umount_err == EBUSY) {
+    TWFunc::KillForUseTargetProcess(mount_point_);
+    if (!symlink_mount_point_.empty()) TWFunc::KillForUseTargetProcess(symlink_mount_point_);
+    // Re-sweep submounts: their first unmount may have failed while held.
+    EnsureSubdirectoryUnmounted(mount_point_.c_str());
+    umount_err = umount2(mount_point_.c_str(), flags) != 0 ? errno : 0;
+  }
   if (!IsMounted()) {
     // fscrypt keys live in the mounted filesystem's keyring.
     if (is_fbe_ && mount_point_ == "/data" && DataManager::GetIntValue(TW_IS_DECRYPTED))

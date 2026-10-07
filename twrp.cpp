@@ -386,12 +386,9 @@ int main(int argc, char* argv[]) {
   android::base::SetProperty(TW_FASTBOOT_MODE_PROP, startup.GetFastbootMode() ? "1" : "0");
   printf("=> Linking mtab\n");
   symlink("/proc/mounts", "/etc/mtab");
-  std::string fstab_filename = "/etc/twrp.fstab";
-  if (!TWFunc::IsPathExists(fstab_filename)) {
-    fstab_filename = "/etc/recovery.fstab";
-  }
-  printf("=> Processing %s\n", fstab_filename.c_str());
-  if (!PartitionManager.ProcessFstab(fstab_filename, true, !startup.GetFastbootMode())) {
+
+  printf("=> Processing Fstab\n");
+  if (!PartitionManager.ProcessFstab("/etc/recovery.fstab", true, !startup.GetFastbootMode())) {
     LOGERR("Failing out of recovery due to problem with fstab.\n");
     return -1;
   }
