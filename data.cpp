@@ -371,6 +371,8 @@ void DataManager::UpdateTimezoneEnvironment() {
 }
 
 void DataManager::SetBackupFolder() {
+  if (android::base::GetBoolProperty("ro.twrp.fastbootd", false)) return;
+
   const auto storage = GetCurrentStoragePath();
   const TWPartition* partition = PartitionManager.FindPartitionByPath(storage);
   auto backup_path = fs::path(storage) / fs::path(TWFunc::CheckForTwrpFolder()).relative_path() /
