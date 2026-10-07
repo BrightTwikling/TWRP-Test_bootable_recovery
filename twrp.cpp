@@ -56,7 +56,6 @@
 namespace fs = std::filesystem;
 
 TWPartitionManager PartitionManager;
-int Log_Offset;
 bool datamedia;
 
 static void DecryptPage(const bool skip_decryption, const bool data_media) {
@@ -346,7 +345,6 @@ int main(int argc, char* argv[]) {
   // Recovery needs to install world-readable files, so clear umask
   // set by init
   umask(0);
-  Log_Offset = 0;
 
   // Set up temporary log file (/tmp/recovery.log)
   freopen(TMP_LOG_FILE, "a", stdout);

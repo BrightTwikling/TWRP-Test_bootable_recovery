@@ -1568,8 +1568,6 @@ bool TWPartition::Wipe(const std::string& new_file_system) {
     return false;
   }
 
-  if (mount_point_ == "/cache") Log_Offset = 0;
-
   if (mount_point_ == TWPartitionManager::GetAndroidRootPath()) {
     if (tw_get_default_metadata(TWPartitionManager::GetAndroidRootPath().c_str()) != 0) {
       gui_msg(Msg(msg::kWarning,

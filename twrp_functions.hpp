@@ -276,6 +276,4 @@ private:
   static void CopyLog(const std::string& src, const std::string& dst);
 };
 
-extern int Log_Offset;
-
 #endif // TWRP_FUNCTIONS_HPP
