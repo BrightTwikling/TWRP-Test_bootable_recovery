@@ -410,7 +410,14 @@ void TWPartitionManager::AddRemainingTwrpFlags(const std::map<std::string, Flags
 
 int TWPartitionManager::ProcessFstab(std::string fstab_filename, const bool display_error,
                                      const bool recovery_mode) {
-  if (GetSuperStatus()) SetupSuperDevices();
+  // Without the super device the logical partitions cannot be mapped, so every
+  // super entry would fail its DM probe in PrepareSuperVolume.
+  const std::string super_partition = GetSuperPartition();
+  if (access(super_partition.c_str(), F_OK) == 0) {
+    SetupSuperDevices();
+  } else {
+    LOGINFO("Super partition not found at %s\n", super_partition.c_str());
+  }
 
   auto twrp_flags = LoadTwrpFlags();
 
@@ -3175,6 +3182,14 @@ std::string TWPartitionManager::GetBarePartitionName(const std::string& mountpoi
   return TWFunc::RemoveBeginningSlash(mountpoint);
 }
 
+static std::string GetByNamePath(const std::string& partition_name) {
+  for (const char* dir : {"/dev/block/bootdevice/by-name", "/dev/block/by-name"}) {
+    const fs::path path = fs::path(dir) / partition_name;
+    if (access(path.c_str(), F_OK) == 0) return path;
+  }
+  return fs::path("/dev/block/by-name") / partition_name;
+}
+
 bool TWPartitionManager::PrepareSuperVolume(TWPartition* twrpPart) {
   Fstab fstab;
   const std::string bare_partition_name = GetBarePartitionName(twrpPart->GetMountPoint());
@@ -3214,7 +3229,7 @@ bool TWPartitionManager::PrepareSuperVolume(TWPartition* twrpPart) {
   twrpPart->UpdateSize(false);
   twrpPart->SetCanBeBackedUp(false);
   twrpPart->SetCanBeWiped(false);
-  const auto bare_partition = fs::path("/dev/block/bootdevice/by-name") / bare_partition_name;
+  const std::string bare_partition = GetByNamePath(bare_partition_name);
 
   if (access(bare_partition.c_str(), F_OK) == -1) {
     LOGINFO("Symlinking %s => %s \n", fstab_entry.blk_device.c_str(), bare_partition.c_str());
@@ -3248,15 +3263,14 @@ bool TWPartitionManager::PrepareAllSuperVolumes() {
 }
 
 std::string TWPartitionManager::GetSuperPartition() {
-  const auto module = BootControlClient::WaitForService();
-  if (module == nullptr) {
+  std::string super_device = "super";
+  if (const auto module = BootControlClient::WaitForService()) {
+    super_device = fs_mgr_get_super_partition_name(module->GetCurrentSlot());
+  } else {
     // No boot control HAL is available.
     LOGINFO("Boot control HAL unavailable, using static super partition path\n");
-    return "/dev/block/by-name/super";
   }
-  const int32_t slot = module->GetCurrentSlot();
-  const std::string super_device = fs_mgr_get_super_partition_name(slot);
-  return fs::path("/dev/block/bootdevice/by-name") / super_device;
+  return GetByNamePath(super_device);
 }
 
 void TWPartitionManager::SetupSuperDevices() {
