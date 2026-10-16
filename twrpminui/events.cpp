@@ -27,6 +27,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <fstream>
+#include <mutex>
+#include "force_feedback.h"
 #ifdef USE_QTI_AIDL_HAPTICS_FIX_OFF
 #include <thread>
 #endif
@@ -156,6 +158,7 @@ int write_to_file(const std::string& fn, const std::string& line) {
 #ifndef TW_HAPTICS_TSPDRV
 int vibrate(int timeout_ms)
 {
+    if (timeout_ms <= 0) return -1;
     if (timeout_ms > 10000) timeout_ms = 1000;
     char tout[6];
     sprintf(tout, "%i", timeout_ms);
@@ -168,6 +171,8 @@ int vibrate(int timeout_ms)
 #elif defined(USE_QTI_AIDL_HAPTICS)
     /* getService() blocks for seconds while the HAL is not up yet, and this
      * runs on the thread drawing the UI. */
+    static std::mutex vibrator_mutex;
+    std::lock_guard<std::mutex> guard(vibrator_mutex);
     static std::shared_ptr<IVibrator> cached_vib;
     if (cached_vib == nullptr)
         cached_vib = IVibrator::fromBinder(ndk::SpAIBinder(AServiceManager_checkService(kVibratorInstance.c_str())));
@@ -175,19 +180,28 @@ int vibrate(int timeout_ms)
     if (vib != nullptr) {
 #ifdef USE_QTI_AIDL_HAPTICS_FIX_OFF
         std::thread([vib, timeout_ms] {
-            if (vib->on((uint32_t)timeout_ms, nullptr).isOk()) {
+            const auto status = vib->on((uint32_t)timeout_ms, nullptr);
+            if (status.isOk()) {
                 vib_on_count++;
                 usleep(timeout_ms * 1000);
                 vib_on_count--;
                 if (!vib_on_count) vib->off();
+            } else if (status.getStatus() == STATUS_OK) {
+                // Only an explicit HAL rejection is safe to retry through FF.
+                twrpminui::play_force_feedback(timeout_ms);
             }
         }).detach();
+        return 0;
 #else
         /* Look again next press if the HAL went away. */
-        if (!vib->on((uint32_t)timeout_ms, nullptr).isOk())
-            cached_vib = nullptr;
+        const auto status = vib->on((uint32_t)timeout_ms, nullptr);
+        if (status.isOk()) return 0;
+        cached_vib = nullptr;
+        // A transport failure can follow a delivered request: avoid playing twice.
+        if (status.getStatus() != STATUS_OK) return -1;
 #endif
     }
+    return twrpminui::play_force_feedback(timeout_ms);
 #elif defined(USE_SAMSUNG_HAPTICS)
     /* Newer Samsung devices have duration file only
      0 in VIBRATOR_TIMEOUT_FILE means no vibration
@@ -199,8 +213,11 @@ int vibrate(int timeout_ms)
     if (std::ifstream(LEDS_HAPTICS_ACTIVATE_FILE).good()) {
         write_to_file(LEDS_HAPTICS_DURATION_FILE, tout);
         write_to_file(LEDS_HAPTICS_ACTIVATE_FILE, "1");
-    } else
+    } else if (access(VIBRATOR_TIMEOUT_FILE, W_OK) == 0) {
         write_to_file(VIBRATOR_TIMEOUT_FILE, tout);
+    } else {
+        return twrpminui::play_force_feedback(timeout_ms);
+    }
 #endif
     return 0;
 }
