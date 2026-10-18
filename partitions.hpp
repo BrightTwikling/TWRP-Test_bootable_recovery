@@ -190,7 +190,7 @@ public:
   bool Mount(bool display_error);
 
   // Unmounts the partition if it is mounted
-  [[nodiscard]] bool Unmount(bool display_error, int flags = 0) const;
+  bool Unmount(bool display_error, int flags = 0) const;
 
   // Remounts the partition
   bool Remount(bool display_error);
@@ -199,10 +199,10 @@ public:
   bool RemountRw(bool display_error);
 
   // Bind mount partition if symlink mountpoint is populated
-  [[nodiscard]] bool BindMount() const;
+  bool BindMount() const;
 
   // Clear the partition using BLKDISCARD ioctl
-  [[nodiscard]] bool BlkDiscard() const;
+  bool BlkDiscard() const;
 
   // Wipes the partition
   bool Wipe(const std::string& new_file_system);
@@ -470,7 +470,7 @@ private:
   static bool IsSparseImage(const std::string& Filename);
 
   // Flashes a sparse image using libsparse
-  [[nodiscard]] bool FlashSparseImage(const std::string& Filename) const;
+  bool FlashSparseImage(const std::string& Filename) const;
 
   // Adds an exclusion for path to both the backup and wipe exclusion lists
   void ExcludeAll(const std::string& path);
@@ -630,7 +630,7 @@ public:
   void SetupFstabPartitions(bool display_error);
 
   // Creates /etc/fstab file that's used by the command line for mount commands
-  [[nodiscard]] int WriteFstab() const;
+  int WriteFstab() const;
 
   // Decrypt Data if enabled
   void DecryptData();
@@ -642,20 +642,20 @@ public:
   static void OutputPartition(const TWPartition* part);
 
   // Mounts partition based on path (e.g. /system)
-  [[nodiscard]] int MountByPath(const std::string& Path, bool display_error) const;
+  int MountByPath(const std::string& Path, bool display_error) const;
 
   // Unmounts partition based on path
-  [[nodiscard]] bool UnmountByPath(const std::string& path, bool display_error,
+  bool UnmountByPath(const std::string& path, bool display_error,
                                    int flags = 0) const;
 
   // Checks if partition is mounted based on path
   [[nodiscard]] int IsMountedByPath(const std::string& Path) const;
 
   // Mounts the current storage location
-  [[nodiscard]] int MountCurrentStorage(bool display_error) const;
+  int MountCurrentStorage(bool display_error) const;
 
   // Mounts the settings file storage location (usually internal)
-  [[nodiscard]] int MountSettingsStorage(bool display_error) const;
+  int MountSettingsStorage(bool display_error) const;
 
   // Returns a pointer to a partition based on path
   [[nodiscard]] TWPartition* FindPartitionByPath(const std::string& Path) const;
@@ -672,43 +672,43 @@ public:
   bool RunBackup();
 
   // Restores a backup
-  [[nodiscard]] int RunRestore(const std::string& restore_name) const;
+  int RunRestore(const std::string& restore_name) const;
 
   void SetRestoreFiles(const std::string& restore_name) const;
 
   // Used to gather a list of available backup partitions for the user to select for a restore
   // Wipes a partition based on path
-  [[nodiscard]] int WipeByPath(const std::string& Path) const;
+  int WipeByPath(const std::string& Path) const;
 
   // Wipes a partition based on path
-  [[nodiscard]] int WipeByPath(const std::string& Path, const std::string& new_file_system) const;
+  int WipeByPath(const std::string& Path, const std::string& new_file_system) const;
 
   // Performs a factory reset
-  [[nodiscard]] int FactoryReset() const;
+  int FactoryReset() const;
 
   // Wipes dalvik cache
-  [[nodiscard]] int WipeDalvikCache() const;
+  int WipeDalvikCache() const;
 
   // Wipes rotation data --
-  [[nodiscard]] int WipeRotateData() const;
+  int WipeRotateData() const;
 
   // Wipe battery stats -- /data/system/batterystats.bin
-  [[nodiscard]] int WipeBatteryStats() const;
+  int WipeBatteryStats() const;
 
   // Wipes android secure
-  [[nodiscard]] int WipeAndroidSecure() const;
+  int WipeAndroidSecure() const;
 
   // Really formats data on /data/media devices -- also removes encryption
   int FormatData();
 
   // Removes and recreates the media folder on /data/media devices
-  [[nodiscard]] int WipeMediaFromData() const;
+  int WipeMediaFromData() const;
 
   // Repairs a partition based on path
-  [[nodiscard]] int RepairByPath(const std::string& Path, bool display_error) const;
+  int RepairByPath(const std::string& Path, bool display_error) const;
 
   // Resizes a partition based on path
-  [[nodiscard]] int ResizeByPath(const std::string& Path, bool display_error) const;
+  int ResizeByPath(const std::string& Path, bool display_error) const;
 
   // Updates fstab, file systems, sizes, etc.
   void UpdateSystemDetails(bool defer_data_size = false, bool display_error = true) const;
@@ -741,7 +741,7 @@ public:
   void UnmountMainPartitions() const;
 
   // Repartitions the sdcard
-  [[nodiscard]] int PartitionSdCard() const;
+  int PartitionSdCard() const;
 
   // Returns a pointer to a default storage partition
   [[nodiscard]] TWPartition* GetDefaultStoragePartition() const;
@@ -755,7 +755,7 @@ public:
   // Clean Backup Folder on Error
   static void CleanBackupFolder(const std::string& backup_folder);
 
-  [[nodiscard]] int FixContexts() const;
+  int FixContexts() const;
 
   void GetPartitionList(const std::string& list_type,
                         std::vector<PartitionList>* partition_list) const;
@@ -810,7 +810,7 @@ public:
   // Prepare all known super volumes from super partition
   bool PrepareAllSuperVolumes();
 
-  [[nodiscard]] bool FlashImage(const std::string& path, const std::string& filename) const;
+  bool FlashImage(const std::string& path, const std::string& filename) const;
 
   // Flashes an image to a selected partition from the partition list
   // Restore the partitions based on type
@@ -930,7 +930,7 @@ private:
   [[nodiscard]] TWPartition*
   FindNextStorage(const std::string& Path, bool exclude_data_media) const;
 
-  [[nodiscard]] int OpenLunFile(const std::string& partition_path,
+  int OpenLunFile(const std::string& partition_path,
                                 const std::string& lun_file) const;
 
   // Completes various post-decrypt tasks
