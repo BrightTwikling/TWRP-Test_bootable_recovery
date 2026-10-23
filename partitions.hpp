@@ -88,6 +88,11 @@ enum class PartitionManagerOp {
 
 class TWPartition;
 
+namespace gui2_backend {
+class twrp_tools_backend;
+class twrp_mount_backend;
+}  // namespace gui2_backend
+
 // Settings for backup session
 struct PartitionSettings {
   // Partition to pass to the partition backup loop
@@ -405,7 +410,7 @@ private:
   bool FindPartitionSize();
 
   // Ensure that a subdirectory is unmounted before unmounting this partition
-  static void EnsureSubdirectoryUnmounted(const char* mount_point);
+  static bool EnsureSubdirectoryUnmounted(const char* mount_point);
 
   // Create an ext2/ext3/ext4 filesystem
   bool WipeExtfs(const std::string& file_system);
@@ -535,6 +540,9 @@ private:
   bool is_decrypted_;
   // File Based Encryption is present
   bool is_fbe_;
+  // Existing device/DE keys installed on this mount
+  bool de_keys_ready_ = false;
+  bool RestoreDeKeys();
   bool mount_to_decrypt_;
   // Mount this partition during decrypt (/vendor, /firmware, etc in case we need proprietary libs or firmware files)
   // Display name for the GUI
@@ -604,6 +612,11 @@ private:
 
   friend class TWPartitionManager;
   friend class DataManager;
+  // gui2 backends render the same partition details as gui/action.cpp.
+  friend class gui2_backend::twrp_tools_backend;
+  // The mount page owns explicit Data remounts and reads this state to report
+  // whether CE credentials are still required.
+  friend class gui2_backend::twrp_mount_backend;
   friend class GUIPartitionList;
   friend class GUIAction;
   friend class PageManager;

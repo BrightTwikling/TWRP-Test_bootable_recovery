@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <condition_variable>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -749,6 +750,7 @@ bool TWPartition::DecryptFbeDe() {
     // Not retried: every attempt installs keys and touches the key directories
     // again, so a retry only widens the damage when the first one went wrong.
     if (android::keystore::Decrypt_DE()) {
+      de_keys_ready_ = true;
       TWPartitionManager::SetCryptoState();
       is_encrypted_ = true;
       is_decrypted_ = false;
@@ -1354,6 +1356,19 @@ bool TWPartition::IsFileSystemWritable() const {
   return access(test_path.c_str(), W_OK) == 0;
 }
 
+bool TWPartition::RestoreDeKeys() {
+#ifdef TW_INCLUDE_FBE
+  if (is_fbe_ && mount_point_ == "/data" && !de_keys_ready_) {
+    if (!android::keystore::Decrypt_DE()) {
+      LOGERR("Unable to restore DE keys on /data\n");
+      return false;
+    }
+    de_keys_ready_ = true;
+  }
+#endif
+  return true;
+}
+
 bool TWPartition::Mount(const bool display_error) {
   bool exfat_mounted = false;
   unsigned int flags = mount_flags_;
@@ -1443,11 +1458,11 @@ bool TWPartition::BindMount() const {
   return true;
 }
 
-void TWPartition::EnsureSubdirectoryUnmounted(const char* mount_point) {
+bool TWPartition::EnsureSubdirectoryUnmounted(const char* mount_point) {
   std::unique_ptr<FILE, decltype(&endmntent)> mnts(setmntent("/proc/mounts", "r"), endmntent);
   if (!mnts) {
-    LOGINFO("Could not read /proc/mounts\n");
-    return;
+    LOGERR("Could not read /proc/mounts before unmount\n");
+    return false;
   }
 
   // Trailing slash makes starts_with() match children ("/data/foo") but skip the mount point itself.
@@ -1470,13 +1485,32 @@ void TWPartition::EnsureSubdirectoryUnmounted(const char* mount_point) {
 
   for (const std::string& sub_mount : umount_points) {
     LOGINFO("Unmounting sub-directory mount '%s'\n", sub_mount.c_str());
-    if (umount(sub_mount.c_str()) != 0)
-      LOGINFO("Failed to unmount '%s': '%s'\n", sub_mount.c_str(), strerror(errno));
+    if (umount(sub_mount.c_str()) != 0) {
+      // A parent overmount can hide an older child still listed in /proc/mounts.
+      if (errno == EINVAL || errno == ENOENT) continue;
+      LOGERR("Failed to unmount '%s': '%s'\n", sub_mount.c_str(), strerror(errno));
+      return false;
+    }
   }
+  return true;
 }
+
+static bool IsPathMounted(const std::string& path) {
+  std::unique_ptr<FILE, decltype(&endmntent)> mounts(setmntent("/proc/mounts", "r"), endmntent);
+  if (!mounts) return false;
+  while (mntent* entry = getmntent(mounts.get())) {
+    if (path == entry->mnt_dir) return true;
+  }
+  return false;
+}
+
+static void StopAsyncDataSize();
 
 bool TWPartition::Unmount(const bool display_error, const int flags) const {
   if (!IsMounted()) return true;
+
+  // A running size walk keeps /data busy and must not outlive its unmount.
+  if (mount_point_ == "/data") StopAsyncDataSize();
 
   int never_unmount_system = 0;
   DataManager::GetValue(TW_DONT_UNMOUNT_SYSTEM, never_unmount_system);
@@ -1484,7 +1518,19 @@ bool TWPartition::Unmount(const bool display_error, const int flags) const {
   if (never_unmount_system == 1 && mount_point_ == TWPartitionManager::GetAndroidRootPath())
     return true;
 
-  EnsureSubdirectoryUnmounted(mount_point_.c_str());
+  // /data/user/0 is a bind mount on /data/data; unmounting the parent takes it
+  // with it, so remember whether it has to come back if we bail out.
+  const bool had_user_bind = mount_point_ == "/data" && IsPathMounted("/data/user/0");
+  const auto restore_user_bind = [&] {
+    if (had_user_bind && !IsPathMounted("/data/user/0") &&
+        mount("/data/data", "/data/user/0", nullptr, MS_BIND, nullptr) != 0) {
+      LOGERR("Unable to restore /data/user/0: %s\n", strerror(errno));
+    }
+  };
+  if (!EnsureSubdirectoryUnmounted(mount_point_.c_str())) {
+    restore_user_bind();
+    return false;
+  }
 
   if (is_storage_ && mtp_storage_id_ > 0) TWPartitionManager::RemoveMtpStorage(mtp_storage_id_);
 
@@ -1502,11 +1548,23 @@ bool TWPartition::Unmount(const bool display_error, const int flags) const {
     umount_err = umount2(mount_point_.c_str(), flags) != 0 ? errno : 0;
   }
   if (!IsMounted()) {
-    // fscrypt keys live in the mounted filesystem's keyring.
-    if (is_fbe_ && mount_point_ == "/data" && DataManager::GetIntValue(TW_IS_DECRYPTED))
+    // Unmounting Data drops the fscrypt keys, so the mount no longer holds a
+    // decryptable view of /data; lock it back instead of reporting a decrypt
+    // that is no longer true.  Unmount() is const, and the lock state is the
+    // point of the call, so the cast is deliberate.
+    if (is_fbe_ && mount_point_ == "/data") {
+      const_cast<TWPartition*>(this)->de_keys_ready_ = false;
       PartitionManager.MarkDataLocked();
+    }
     return true;
   }
+  // The parent is still mounted: restore storage access removed above rather
+  // than leaving /sdcard and MTP detached on failure.
+  restore_user_bind();
+  if (!symlink_mount_point_.empty() && !IsPathMounted(symlink_mount_point_)) {
+    if (!BindMount()) LOGERR("Unable to restore bind mount '%s'\n", symlink_mount_point_.c_str());
+  }
+  if (is_storage_ && mtp_storage_id_ > 0) TWPartitionManager::AddMtpStorage(mtp_storage_id_);
   if (display_error)
     gui_msg(Msg(msg::kError, "fail_unmount=Failed to unmount '{1}' ({2})")(mount_point_)(
         strerror(umount_err)));
@@ -2498,6 +2556,9 @@ bool TWPartition::DataIsLocked() {
 struct AsyncSizeState {
   std::mutex lock;
   bool running = false;
+  bool worker_active = false;
+  std::atomic<bool> cancel{false};
+  std::condition_variable finished;
   TWPartition* pending_partition = nullptr;
   unsigned long long pending_size = 0;
 };
@@ -2508,12 +2569,25 @@ static AsyncSizeState& GetAsyncSizeState() {
   return *state;
 }
 
+// Waits for a detached size worker to notice the cancel flag. The worker
+// keeps the state alive, so this cannot race with its teardown.
+static void StopAsyncDataSize() {
+  AsyncSizeState& state = GetAsyncSizeState();
+  std::unique_lock lock(state.lock);
+  state.cancel.store(true);
+  state.finished.wait(lock, [&] { return !state.worker_active; });
+  state.pending_partition = nullptr;
+  state.running = false;
+}
+
 void TWPartition::UpdateDataSizeAsync() {
   AsyncSizeState& state = GetAsyncSizeState();
   {
     std::lock_guard lock(state.lock);
     if (!backup_size_provisional_ || state.running) return;
     state.running = true;
+    state.worker_active = true;
+    state.cancel.store(false);
   }
 
   // The worker must use a snapshot; BackupTar() mutates the real list.
@@ -2526,7 +2600,9 @@ void TWPartition::UpdateDataSizeAsync() {
     std::thread([partition, exclusions, path, dev]() mutable {
       unsigned long long size = 0;
       // Prefer filesystem counters, then fall back to the directory walk.
-      if (const uint64_t es = exclusions.Get_Exclusions_Folder_Size(); es > 0 && !dev.empty()) {
+      const std::atomic<bool>* cancel = &GetAsyncSizeState().cancel;
+      const uint64_t es = exclusions.Get_Exclusions_Folder_Size(cancel);
+      if (!cancel->load() && es > 0 && !dev.empty()) {
         char cmdBuf[256];
         constexpr char _cmd[] =
             "dump.f2fs -d1 %s | grep %s | awk -F ': ' '{print $2}' | awk -F ']' '{print $1}'";
@@ -2546,20 +2622,27 @@ void TWPartition::UpdateDataSizeAsync() {
         }
         LOGINFO("Data size: f2fs fast path %s (exclusions %lu bytes).\n", size > 0 ? "hit" : "miss", es);
       }
-      if (size == 0) {
+      if (size == 0 && !cancel->load()) {
         // dump.f2fs unavailable: use the old walk.
         LOGINFO("Data size: falling back to folder walk.\n");
-        size = exclusions.Get_Folder_Size(path, false);
+        size = exclusions.Get_Folder_Size(path, false, cancel);
       }
       AsyncSizeState& state = GetAsyncSizeState();
       std::lock_guard lock(state.lock);
-      state.pending_partition = partition;
-      state.pending_size = size;
+      // A cancelled walk must not publish a partial size or hold the mount.
+      if (!cancel->load()) {
+        state.pending_partition = partition;
+        state.pending_size = size;
+      }
+      state.worker_active = false;
+      state.finished.notify_all();
     }).detach();
   } else {
     LOGINFO("'%s' is not mounted, keeping the statfs backup size.\n", path.c_str());
     std::lock_guard lock(state.lock);
     state.running = false;
+    state.worker_active = false;
+    state.finished.notify_all();
   }
 }
 
@@ -2645,22 +2728,6 @@ bool TWPartition::UpdateSize(const bool display_error, const bool defer_folder_s
   return true;
 }
 
-// Whatever the volume calls itself, empty when it has no label.
-static std::string GetVolumeLabel(const std::string& block_device) {
-  const char* label;
-  std::string name;
-
-  const auto pr = blkid_new_probe_from_filename(block_device.c_str());
-  if (!pr) return name;
-  // Free the probe on every exit path from here.
-  auto pr_guard = android::base::make_scope_guard([&] {
-    blkid_free_probe(pr);
-  });
-  if (blkid_do_fullprobe(pr) == 0 && blkid_probe_lookup_value(pr, "LABEL", &label, nullptr) ==
-      0) name = label;
-  return name;
-}
-
 bool TWPartition::FindWildcardBlockDevices(const std::string& device) {
   // we will need to create separate mount points for each partition found and we use this index to name each one
   int mount_point_index = 0;
@@ -2682,14 +2749,22 @@ bool TWPartition::FindWildcardBlockDevices(const std::string& device) {
 
     // GetPath() keeps the trailing slash, so do not add another one.
     std::string item = path + de->d_name;
-    if (PartitionManager.FindPartitionByBlockDevice(item)) continue;
+    if (PartitionManager.FindPartitionByBlockDevice(item)) {
+      ++mount_point_index;
+      continue;
+    }
+    std::string child_mount;
+    do {
+      child_mount = std::format("{}-{}", mount_point_, ++mount_point_index);
+    } while (PartitionManager.FindPartitionByPath(child_mount));
     auto* part = new TWPartition;
-    std::string buffer = std::format("{} {}-{} auto defaults defaults", item, mount_point_,
-                                     ++mount_point_index);
-    part->ProcessFstabLine(buffer.c_str(), false, nullptr);
-    // Prefer the label, number whatever name is already taken.
-    std::string display = GetVolumeLabel(item);
-    if (display.empty()) display = storage_name_;
+    std::string buffer = std::format("{} {} auto defaults defaults", item, child_mount);
+    if (!part->ProcessFstabLine(buffer.c_str(), false, nullptr)) {
+      delete part;
+      continue;
+    }
+    // Discovery must not probe or mount a slow or damaged filesystem on the GUI thread.
+    std::string display = storage_name_;
     if (PartitionManager.
       StorageNameInUse(display)) display += " " + std::to_string(mount_point_index);
     part->storage_name_ = display;
@@ -2704,7 +2779,7 @@ bool TWPartition::FindWildcardBlockDevices(const std::string& device) {
     part->can_be_wiped_ = can_be_wiped_;
     part->wipe_available_in_gui_ = wipe_available_in_gui_;
     part->FindActualBlockDevice();
-    part->UpdateSize(false);
+    part->FindPartitionSize();
     has_sub_partition_ = true;
     TWPartitionManager::OutputPartition(part);
     PartitionManager.AddPartition(part);
@@ -2737,7 +2812,11 @@ void TWPartition::FindActualBlockDevice() {
     }
     return;
   }
-  if (is_decrypted_ && !decrypted_block_device_.empty()) {
+  // An unmount leaves the metadata mapping alive, and the mapping keeps the raw
+  // device for itself: mounting the raw node instead can only fail EBUSY. So the
+  // decrypted device wins whenever it exists, even with the CE keys dropped by
+  // MarkDataLocked() in between.
+  if (!decrypted_block_device_.empty()) {
     actual_block_device_ = decrypted_block_device_;
     if (TWFunc::IsPathExists(decrypted_block_device_)) {
       is_present_ = true;
