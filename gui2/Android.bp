@@ -24,8 +24,9 @@ genrule {
 }
 
 // LVGL-based recovery UI library.
-cc_library_static {
+cc_library_shared {
     name: "libgui2",
+    recovery: true,
     defaults: ["twrp_defaults"],
     cflags: [
         "-DLV_CONF_INCLUDE_SIMPLE",
@@ -127,15 +128,16 @@ cc_library_static {
         "shell/splash.cpp",
     ],
     static_libs: [
-        "liblvgl_twrp",
-        "libvpx",
-        "libwebm_mkvmuxer",
-        "libtwrpperf",
         "librecovery_utils",
     ],
     shared_libs: [
         "libbase",
         "liblog",
         "libtwrpminui",
+        "libtwrpperf",
+        "libtwmsg_twrp",
+        "liblvgl_twrp",
+        "libvpx",
+        "libwebm_mkvmuxer",
     ],
 }

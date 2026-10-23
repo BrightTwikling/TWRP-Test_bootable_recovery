@@ -74,16 +74,6 @@ Message::operator std::string() const
 /*
 Resource manager lookup
 */
-namespace msg
-{
-	static Translator gTranslator = NULL;
-
-	void SetTranslator(Translator translator)
-	{
-		gTranslator = translator;
-	}
-}
-
 class ResourceLookup : public StringLookup
 {
 public:
@@ -100,8 +90,9 @@ public:
 			default_value = name.substr(pos + 1);
 		}
 
-		if (msg::gTranslator) {
-			std::string translated = msg::gTranslator(resname);
+		msg::Translator translator = msg::GetTranslator();
+		if (translator) {
+			std::string translated = translator(resname);
 			if (!translated.empty())
 				return translated;
 		}

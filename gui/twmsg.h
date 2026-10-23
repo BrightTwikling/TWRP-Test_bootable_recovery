@@ -44,6 +44,7 @@ namespace msg
 	// one because it does not load the legacy theme's resources.
 	typedef std::string (*Translator)(const std::string& name);
 	void SetTranslator(Translator translator);
+	Translator GetTranslator();
 
 	// These get translated to colors in the GUI console
 	enum Kind

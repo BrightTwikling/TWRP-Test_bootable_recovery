@@ -81,15 +81,24 @@ cc_library_static {
     ],
     shared_libs: [
         "libtwrpminui",
+        "libtwrpperf",
+        "libtwmsg_twrp",
         "libbase",
         "libc",
         "libstdc++",
         "libselinux",
-        "libziparchive"
+        "libziparchive",
     ],
     static_libs: [
         "libotautil",
         "libpng",
-        "libtwrpperf",
     ]
+}
+
+// Translator hook shared between the legacy message catalogue and libgui2.
+cc_library_shared {
+    name: "libtwmsg_twrp",
+    recovery: true,
+    defaults: ["twrp_defaults"],
+    srcs: ["twmsg_state.cpp"],
 }

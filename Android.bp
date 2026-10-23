@@ -535,11 +535,6 @@ cc_binary {
         "libzstd",
         "update_metadata-protos",
         "libtwrpgui",
-        "libgui2",
-        "libvpx",
-        "libwebm_mkvmuxer",
-        "liblvgl_twrp",
-        "libtwrpperf",
         "libtar_static",
         "libmounts",
         "libotautil",
@@ -595,6 +590,13 @@ cc_binary {
 
         "libext4_utils",
         "libft2",
+
+        "libvpx",
+        "libwebm_mkvmuxer",
+        "liblvgl_twrp",
+        "libgui2",
+        "libtwrpperf",
+        "libtwmsg_twrp",
     ] + select(soong_config_variable("twrpGlobalVars", "include_libresetprop"), {
         true: [
             "libresetprop",
