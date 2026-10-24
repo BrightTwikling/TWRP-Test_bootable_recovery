@@ -435,6 +435,7 @@ extern const language_pack kTraditionalChinese = {
   "安裝日誌",
   "清除日誌",
   "刷入 ZIP",
+  "交換返回鍵與導覽列位置",
 };
 
 }  // namespace gui2_i18n

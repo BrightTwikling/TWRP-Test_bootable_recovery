@@ -429,6 +429,7 @@ struct language_pack {
   const char* progress_install_log;
   const char* progress_wipe_log;
   const char* progress_install_title;
+  const char* swap_navigation;
 };
 
 const language_pack& get_language_pack(language_id language);

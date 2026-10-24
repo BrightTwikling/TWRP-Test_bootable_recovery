@@ -435,6 +435,7 @@ extern const language_pack kSimplifiedChinese = {
   "安装日志",
   "清除日志",
   "刷入 ZIP",
+  "交换返回键与导航栏位置",
 };
 
 }  // namespace gui2_i18n

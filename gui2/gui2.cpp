@@ -1578,6 +1578,7 @@ static void rebuild_general_settings_items(void) {
     general_settings_items[general_settings_count++] = { group, label, key, flag(key, 0) != 0 };
   };
 
+  add(text.appearance_title, text.swap_navigation, "tw_gui2_swap_navigation");
   add(text.general_group_install, text.general_zip_signature, "tw_signed_zip_verify");
   add(nullptr, text.general_skip_digest_zip, "tw_skip_digest_check_zip");
   add(nullptr, text.general_install_reboot, "tw_install_reboot");
@@ -1605,6 +1606,7 @@ static void general_setting_event_cb(lv_event_t* event) {
   const bool wanted = lv_obj_has_state(toggle, LV_STATE_CHECKED);
   // The row keeps its old state unless the value actually reached the disk.
   if (!settings->set_persistent(item.key, wanted ? "1" : "0") || !settings->flush()) {
+    settings->set_persistent(item.key, item.value ? "1" : "0");
     if (wanted)
       lv_obj_remove_state(toggle, LV_STATE_CHECKED);
     else
@@ -1612,6 +1614,8 @@ static void general_setting_event_cb(lv_event_t* event) {
     return;
   }
   item.value = wanted;
+  if (strcmp(item.key, "tw_gui2_swap_navigation") == 0)
+    gui2_shell::set_bottom_navigation_swapped(navigation_view, ui, wanted);
   if (hardware != nullptr) hardware->vibrate(gui2_backend::haptic_channel::BUTTON);
 }
 
@@ -1619,6 +1623,8 @@ static void restore_defaults_event_cb(lv_event_t* event) {
   if (lv_event_get_code(event) != LV_EVENT_CLICKED || !accept_click(event) || settings == nullptr)
     return;
   if (!settings->restore_defaults()) return;
+  gui2_shell::set_bottom_navigation_swapped(
+      navigation_view, ui, settings->get_int("tw_gui2_swap_navigation", 0) != 0);
   // tw_language went back to its default as well.
   current_language = language_from_code(settings->get_string("tw_language", "en"));
   pending_language = current_language;
@@ -5712,6 +5718,8 @@ static void create_gui2_shell(lv_obj_t* screen) {
   navigation_view = gui2_shell::create_bottom_navigation(
       screen, ui, home_navigation_active, navigation_event_cb, press_cancel_guard_cb,
       !fastboot_mode);
+  gui2_shell::set_bottom_navigation_swapped(
+      navigation_view, ui, settings != nullptr && settings->get_int("tw_gui2_swap_navigation", 0) != 0);
 
   create_quick_menu();
   if (mouse_cursor == nullptr)

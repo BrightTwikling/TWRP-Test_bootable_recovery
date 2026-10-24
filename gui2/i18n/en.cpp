@@ -437,6 +437,7 @@ extern const language_pack kEnglish = {
   "Installation log",
   "Wipe log",
   "Install ZIP",
+  "Swap back button and navigation bar",
 };
 
 }  // namespace gui2_i18n

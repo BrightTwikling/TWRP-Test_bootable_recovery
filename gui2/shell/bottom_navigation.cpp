@@ -124,10 +124,24 @@ bottom_navigation_view create_bottom_navigation(lv_obj_t* screen,
                                   event_callback, press_guard_callback,
                                   pill_width - item_width * (show_console ? 2 : 1), pill_height,
                                   true);
+  view.back = back;
+  view.pill = pill;
   view.home_icon = lv_obj_get_child(home, 0);
   view.console_icon = console == nullptr ? nullptr : lv_obj_get_child(console, 0);
   view.power_icon = lv_obj_get_child(power, 0);
   return view;
+}
+
+void set_bottom_navigation_swapped(const bottom_navigation_view& view,
+                                   const gui2_core::ui_metrics& metrics, bool swapped) {
+  if (view.back == nullptr || view.pill == nullptr) return;
+  lv_obj_update_layout(view.root);
+  const int back_width = lv_obj_get_width(view.back);
+  const int pill_width = lv_obj_get_width(view.pill);
+  const int gap = gui2_core::ui_px(30);
+  const int left = std::max(0, (metrics.width - back_width - gap - pill_width) / 2);
+  lv_obj_set_x(view.back, swapped ? left + pill_width + gap : left);
+  lv_obj_set_x(view.pill, swapped ? left : left + back_width + gap);
 }
 
 void refresh_bottom_navigation(const bottom_navigation_view& view, bool home_active) {
