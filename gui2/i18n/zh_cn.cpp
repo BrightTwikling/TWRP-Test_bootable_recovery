@@ -368,6 +368,7 @@ extern const language_pack kSimplifiedChinese = {
   "键盘",
   "调整按键离屏幕底边的高度",
   "底部抬高",
+  "保留底部导航",
   "通用设置",
   "安装、备份与调试相关的开关",
   "安装",

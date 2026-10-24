@@ -1593,6 +1593,9 @@ static void restore_defaults_event_cb(lv_event_t* event) {
   if (!settings->restore_defaults()) return;
   gui2_shell::set_bottom_navigation_swapped(
       navigation_view, ui, settings->get_int("tw_gui2_swap_navigation", 0) != 0);
+  gui2_components::set_keyboard_keep_navigation(
+      settings->get_int("tw_gui2_keyboard_keep_navigation", 0) != 0);
+  apply_keyboard_lift(keyboard_lift_percent());
   // tw_language went back to its default as well.
   current_language = language_from_code(settings->get_string("tw_language", "en"));
   pending_language = current_language;
@@ -1623,6 +1626,22 @@ static void show_general_settings_page(page_transition transition) {
                                        strings().general_restore_defaults, press_cancel_guard_cb);
 }
 
+static void keyboard_navigation_event_cb(lv_event_t* event) {
+  if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || settings == nullptr) return;
+  auto* toggle = static_cast<lv_obj_t*>(lv_event_get_target(event));
+  const bool previous = gui2_components::keyboard_keep_navigation();
+  const bool wanted = lv_obj_has_state(toggle, LV_STATE_CHECKED);
+  if (!settings->set_persistent("tw_gui2_keyboard_keep_navigation", wanted ? "1" : "0") ||
+      !settings->flush()) {
+    settings->set_persistent("tw_gui2_keyboard_keep_navigation", previous ? "1" : "0");
+    if (previous) lv_obj_add_state(toggle, LV_STATE_CHECKED);
+    else lv_obj_remove_state(toggle, LV_STATE_CHECKED);
+    return;
+  }
+  gui2_components::set_keyboard_keep_navigation(wanted);
+  if (hardware != nullptr) hardware->vibrate(gui2_backend::haptic_channel::BUTTON);
+}
+
 static void show_keyboard_settings_page(page_transition transition) {
   hardware_settings_dirty = false;
   keyboard_lift_binding = { nullptr, gui2_backend::haptic_channel::BUTTON, false, false, false,
@@ -1644,6 +1663,9 @@ static void show_keyboard_settings_page(page_transition transition) {
   update_hardware_slider_value(keyboard_lift_binding,
                                gui2_components::get_value(&keyboard_lift_binding.visual));
   gui2_components::refresh_slider(&keyboard_lift_binding.visual);
+  gui2_components::create_switch_row(
+      page.body, ui, strings().keyboard_keep_navigation,
+      gui2_components::keyboard_keep_navigation(), keyboard_navigation_event_cb, nullptr);
   lv_obj_update_layout(page.body);
 }
 
@@ -2475,7 +2497,7 @@ static void build_search_toolbar(gui2_pages::file_toolbar_view* view, const std:
   if (root == nullptr) return;
   lv_obj_set_align(root, LV_ALIGN_TOP_LEFT);
   lv_obj_set_pos(root, 0,
-                 ui.height - gui2_components::keyboard_height(
+                 ui.height - gui2_components::keyboard_reserved_height(
                                  ui, gui2_components::keyboard_layout::LETTERS));
   page_state.search_keyboard.bind(view->input);
 }
@@ -3464,7 +3486,7 @@ static void show_console_page(page_transition transition) {
 
   gui2_pages::terminal_page_options options;
   options.content = main_content;
-  // The keyboard has to cover the navigation, which lives above the page.
+  // Overlay keyboards reserve the shell navigation area below their viewport.
   options.overlay_layer = lv_layer_top();
   options.metrics = &ui;
   options.strings = &strings();
@@ -5724,6 +5746,8 @@ static void create_gui2_shell(lv_obj_t* screen) {
   // Every page that reserves keyboard space asks the component for the height,
   // so the stored lift has to be in place before the first page is built.
   apply_keyboard_lift(keyboard_lift_percent());
+  gui2_components::set_keyboard_keep_navigation(
+      settings != nullptr && settings->get_int("tw_gui2_keyboard_keep_navigation", 0) != 0);
 
   navigate_to(page_kind::HOME, nullptr, page_transition::NONE);
 

@@ -368,6 +368,7 @@ extern const language_pack kEnglish = {
   "Keyboard",
   "Adjust how high the keys sit off the bottom edge",
   "Bottom margin",
+  "Keep navigation visible",
   "General Settings",
   "Install, backup and debugging switches",
   "Install",

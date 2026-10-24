@@ -368,6 +368,7 @@ extern const language_pack kTraditionalChinese = {
   "鍵盤",
   "調整按鍵離螢幕底邊的高度",
   "底部抬高",
+  "保留底部導覽",
   "一般設定",
   "安裝、備份與偵錯相關的開關",
   "安裝",

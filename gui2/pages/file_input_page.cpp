@@ -18,7 +18,7 @@ gui2_components::keyboard_layout layout_for(bool numeric) {
 }  // namespace
 
 int file_input_bottom_reserved(const gui2_core::ui_metrics& metrics, bool numeric) {
-  return gui2_components::keyboard_height(metrics, layout_for(numeric)) + metrics.cards_top_gap;
+  return gui2_components::keyboard_reserved_height(metrics, layout_for(numeric)) + metrics.cards_top_gap;
 }
 
 file_input_page_view build_file_input_page(const file_input_page_options& options) {
@@ -88,7 +88,7 @@ file_input_page_view build_file_input_page(const file_input_page_options& option
       lv_obj_set_align(view.keyboard, LV_ALIGN_TOP_LEFT);
       lv_obj_set_pos(view.keyboard, 0,
                      metrics.height -
-                         gui2_components::keyboard_height(metrics, layout_for(options.numeric)));
+                         gui2_components::keyboard_reserved_height(metrics, layout_for(options.numeric)));
       options.keyboard->bind(view.input);
     }
   }

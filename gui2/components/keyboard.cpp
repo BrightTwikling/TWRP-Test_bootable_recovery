@@ -11,6 +11,7 @@ namespace {
 
 // Set from settings before any keyboard exists.
 int lift_pixels = 0;
+bool keep_navigation_visible = false;
 keyboard* current_keyboard = nullptr;
 std::vector<keyboard*> active_keyboards;
 
@@ -154,6 +155,14 @@ void set_keyboard_lift(int pixels) {
   lift_pixels = std::max(0, pixels);
 }
 
+void set_keyboard_keep_navigation(bool enabled) {
+  keep_navigation_visible = enabled;
+}
+
+bool keyboard_keep_navigation() {
+  return keep_navigation_visible;
+}
+
 int keyboard_base_height(const gui2_core::ui_metrics& metrics, keyboard_layout layout,
                          bool shell_row) {
   const geometry g = measure(metrics, layout, shell_row);
@@ -163,6 +172,12 @@ int keyboard_base_height(const gui2_core::ui_metrics& metrics, keyboard_layout l
 int keyboard_height(const gui2_core::ui_metrics& metrics, keyboard_layout layout,
                     bool shell_row) {
   return keyboard_base_height(metrics, layout, shell_row) + keyboard_lift();
+}
+
+int keyboard_reserved_height(const gui2_core::ui_metrics& metrics, keyboard_layout layout,
+                             bool shell_row) {
+  return keyboard_height(metrics, layout, shell_row) +
+         (keep_navigation_visible ? std::max(0, metrics.nav_height) : 0);
 }
 
 // The characters a shell needs constantly. Without these every pipe or
@@ -316,26 +331,34 @@ lv_obj_t* keyboard::create(const keyboard_options& options) {
   action_callback_ = options.action_callback;
   user_data_ = options.user_data;
 
-  const geometry g = measure(*metrics_, layout_);
+  const geometry g = measure(*metrics_, layout_, shell_row_);
+  // Pages position this fixed viewport above navigation. Only the panel moves,
+  // so its slide animation cannot draw or receive touches over the nav bar.
   root_ = lv_obj_create(options.parent);
+  lv_obj_remove_style_all(root_);
   lv_obj_add_event_cb(root_, root_delete_cb, LV_EVENT_DELETE, this);
   lv_obj_set_size(root_, metrics_->width, keyboard_height(*metrics_, layout_, shell_row_));
-  lv_obj_set_style_pad_all(root_, g.side_pad, LV_PART_MAIN);
-  lv_obj_set_style_pad_bottom(root_, g.side_pad + keyboard_lift(), LV_PART_MAIN);
-  lv_obj_set_style_pad_row(root_, g.gap, LV_PART_MAIN);
-  lv_obj_set_style_border_width(root_, 0, LV_PART_MAIN);
-  lv_obj_set_style_radius(root_, 0, LV_PART_MAIN);
-  gui2_core::set_surface_style(root_, gui2_core::ui.key_panel);
+  lv_obj_set_clickable(root_, false);
+  lv_obj_set_overflow_visible(root_, false);
   gui2_core::disable_scrolling(root_);
-  lv_obj_set_flex_flow(root_, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_align(root_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+  rows_ = lv_obj_create(root_);
+  lv_obj_set_size(rows_, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_pos(rows_, 0, 0);
+  lv_obj_set_style_pad_all(rows_, g.side_pad, LV_PART_MAIN);
+  lv_obj_set_style_pad_bottom(rows_, g.side_pad + keyboard_lift(), LV_PART_MAIN);
+  lv_obj_set_style_pad_row(rows_, g.gap, LV_PART_MAIN);
+  lv_obj_set_style_border_width(rows_, 0, LV_PART_MAIN);
+  lv_obj_set_style_radius(rows_, 0, LV_PART_MAIN);
+  gui2_core::set_surface_style(rows_, gui2_core::ui.key_panel);
+  gui2_core::disable_scrolling(rows_);
+  lv_obj_set_flex_flow(rows_, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(rows_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
   prepare_field(textarea_, gui2_core::ui.primary_text);
   blink_field_is(textarea_);
 
-  rows_ = root_;
   build_rows();
-  resting_y_ = 0;
   manually_hidden_ = options.start_hidden;
   if (options.start_hidden) lv_obj_set_hidden(root_, true);
   fields_.clear();
@@ -743,10 +766,8 @@ void keyboard::hidden_anim_done(lv_anim_t* anim) {
   auto* self = static_cast<keyboard*>(lv_anim_get_user_data(anim));
   if (self == nullptr || self->root_ == nullptr) return;
   lv_obj_set_hidden(self->root_, true);
-  // Straight back to the stored resting place, not derived from where the
-  // slide happened to stop. Leaving it parked off-screen makes the next show()
-  // read that as the resting place and slide to nowhere.
-  lv_obj_set_y(self->root_, self->resting_y_);
+  // Keep the viewport fixed; the next slide starts from a clean panel offset.
+  if (self->rows_ != nullptr) lv_obj_set_y(self->rows_, 0);
 }
 
 // Scrolls the page so the field clears the keyboard's resting top edge.
@@ -766,31 +787,27 @@ static void reveal_field(lv_obj_t* textarea, lv_obj_t* keyboard_root, int restin
 }
 
 void keyboard::show() {
-  if (root_ == nullptr) return;
+  if (root_ == nullptr || rows_ == nullptr) return;
   manually_hidden_ = false;
   current_keyboard = this;
-  // The page sets the keyboard's position after create(); its y only leaves
-  // that resting place while a slide is running.
-  if (lv_anim_get(root_, slide_y_cb) == nullptr) resting_y_ = lv_obj_get_y(root_);
-  lv_anim_delete(root_, slide_y_cb);
+  lv_anim_delete(rows_, slide_y_cb);
   const bool was_hidden = lv_obj_is_hidden(root_);
   lv_obj_set_hidden(root_, false);
+  lv_obj_update_layout(root_);
 
-  // Off-screen when it was hidden, otherwise wherever an interrupted slide left
-  // it. Returning early here is what used to strand the keyboard halfway when
-  // it was shown and hidden in quick succession.
-  const int from = was_hidden ? resting_y_ + lv_obj_get_height(root_) : lv_obj_get_y(root_);
-  if (from == resting_y_) return;
-  lv_obj_set_y(root_, from);
+  // Reversing an interrupted slide uses the panel's current offset. The root
+  // stays above navigation throughout both directions of the animation.
+  const int from = was_hidden ? lv_obj_get_height(root_) : lv_obj_get_y(rows_);
+  if (from == 0) return;
+  lv_obj_set_y(rows_, from);
   if (shown_callback_ != nullptr) shown_callback_(user_data_);
-  reveal_field(textarea_, root_, resting_y_);
+  reveal_field(textarea_, root_, lv_obj_get_y(root_));
 
-  // Slide up rather than appearing all at once.
   lv_anim_t anim;
   lv_anim_init(&anim);
-  lv_anim_set_var(&anim, root_);
+  lv_anim_set_var(&anim, rows_);
   lv_anim_set_exec_cb(&anim, slide_y_cb);
-  lv_anim_set_values(&anim, from, resting_y_);
+  lv_anim_set_values(&anim, from, 0);
   lv_anim_set_duration(&anim, 180);
   lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
   lv_anim_start(&anim);
@@ -802,16 +819,16 @@ void keyboard::hide() {
 }
 
 void keyboard::hide_internal() {
-  if (root_ != nullptr && !lv_obj_is_hidden(root_)) {
-    const auto* running = lv_anim_get(root_, slide_y_cb);
+  if (root_ != nullptr && rows_ != nullptr && !lv_obj_is_hidden(root_)) {
+    lv_obj_update_layout(root_);
+    const auto* running = lv_anim_get(rows_, slide_y_cb);
     if (running != nullptr && running->completed_cb == hidden_anim_done) return;
-    if (running == nullptr) resting_y_ = lv_obj_get_y(root_);
-    lv_anim_delete(root_, slide_y_cb);
+    lv_anim_delete(rows_, slide_y_cb);
     lv_anim_t anim;
     lv_anim_init(&anim);
-    lv_anim_set_var(&anim, root_);
+    lv_anim_set_var(&anim, rows_);
     lv_anim_set_exec_cb(&anim, slide_y_cb);
-    lv_anim_set_values(&anim, lv_obj_get_y(root_), resting_y_ + lv_obj_get_height(root_));
+    lv_anim_set_values(&anim, lv_obj_get_y(rows_), lv_obj_get_height(root_));
     lv_anim_set_duration(&anim, 160);
     lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
     // The flag goes on only once it is off-screen, or it vanishes mid-slide.
@@ -828,7 +845,7 @@ void keyboard::dismiss() {
   fields_.clear();
   blink_stop();
   if (root_ != nullptr) {
-    lv_anim_delete(root_, slide_y_cb);
+    if (rows_ != nullptr) lv_anim_delete(rows_, slide_y_cb);
     lv_obj_delete(root_);
   }
   root_ = nullptr;

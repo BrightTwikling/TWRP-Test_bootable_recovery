@@ -28,7 +28,7 @@ void layout_terminal_output(terminal_page_view* view, const gui2_core::ui_metric
   lv_area_t area;
   lv_obj_get_coords(content, &area);
   const int bottom = keyboard_visible ?
-      metrics.height - gui2_components::keyboard_height(
+      metrics.height - gui2_components::keyboard_reserved_height(
           metrics, gui2_components::keyboard_layout::LETTERS, true) - metrics.cards_top_gap :
       metrics.height - gui2_core::navigation_safe_area();
   const int height = std::max(view->cell_height + view->output.padding * 2,
@@ -84,7 +84,7 @@ terminal_page_view build_terminal_page(const terminal_page_options& options) {
     view.keyboard = options.keyboard->create(keyboard);
     if (view.keyboard != nullptr && options.overlay_layer != nullptr) {
       lv_obj_set_align(view.keyboard, LV_ALIGN_TOP_LEFT);
-      lv_obj_set_pos(view.keyboard, 0, metrics.height - gui2_components::keyboard_height(
+      lv_obj_set_pos(view.keyboard, 0, metrics.height - gui2_components::keyboard_reserved_height(
           metrics, gui2_components::keyboard_layout::LETTERS, true));
     }
   }

@@ -65,15 +65,19 @@ struct keyboard_options {
 // page that reserves keyboard space has to agree on it.
 void set_keyboard_lift(int pixels);
 int keyboard_lift();
+void set_keyboard_keep_navigation(bool enabled);
+bool keyboard_keep_navigation();
 
-// The height the keyboard occupies, lift included, so a page can reserve the
-// space before the keyboard itself exists.
+// The visible keyboard panel height, including the user's bottom margin.
 int keyboard_height(const gui2_core::ui_metrics& metrics, keyboard_layout layout,
                     bool shell_row = false);
 
-// The same without the user's bottom margin. A page that reserves space for a
-// keyboard should use this: the margin is empty panel, and letting it eat the
-// page's own content is what makes the output box shrink as the slider moves.
+// Panel plus navigation when the keyboard navigation option is enabled.
+// Use metrics.height - this height for placement and content-area calculations.
+int keyboard_reserved_height(const gui2_core::ui_metrics& metrics, keyboard_layout layout,
+                             bool shell_row = false);
+
+// Key rows and padding without the user's extra bottom margin.
 int keyboard_base_height(const gui2_core::ui_metrics& metrics, keyboard_layout layout,
                          bool shell_row = false);
 
@@ -160,8 +164,8 @@ class keyboard {
   std::vector<std::vector<key>> symbol_rows() const;
   std::vector<std::vector<key>> number_rows() const;
 
-  lv_obj_t* root_ = nullptr;
-  lv_obj_t* rows_ = nullptr;
+  lv_obj_t* root_ = nullptr;  // Fixed clipping viewport above navigation.
+  lv_obj_t* rows_ = nullptr;  // Panel animated within the viewport.
   const gui2_core::ui_metrics* metrics_ = nullptr;
   const gui2_i18n::language_pack* strings_ = nullptr;
   lv_obj_t* textarea_ = nullptr;
@@ -180,7 +184,6 @@ class keyboard {
   void* user_data_ = nullptr;
   static void slide_y_cb(void* target, int32_t value);
   static void hidden_anim_done(lv_anim_t* anim);
-  int resting_y_ = 0;
   bool manually_hidden_ = false;
 
   std::vector<key> keys_;  // stable storage the buttons point into

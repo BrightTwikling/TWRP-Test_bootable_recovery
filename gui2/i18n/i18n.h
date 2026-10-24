@@ -396,6 +396,7 @@ struct language_pack {
   const char* keyboard_settings_title;
   const char* keyboard_settings_summary;
   const char* keyboard_lift_label;
+  const char* keyboard_keep_navigation;
   const char* general_settings_title;
   const char* general_settings_summary;
   const char* general_group_install;
