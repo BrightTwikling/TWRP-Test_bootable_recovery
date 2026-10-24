@@ -26,9 +26,6 @@ void operation_start(const std::string& operation_name) {
   DataManager::SetValue("ui_progress", 0);
   DataManager::SetValue("ui_portion_size", 0);
   DataManager::SetValue("ui_portion_start", 0);
-  DataManager::SetValue("tw_operation", operation_name);
-  DataManager::SetValue("tw_operation_state", 0);
-  DataManager::SetValue("tw_operation_status", 0);
 #ifdef AB_OTA_UPDATER
   DataManager::SetValue("tw_ab_device", 1);
 #else
@@ -39,12 +36,6 @@ void operation_start(const std::string& operation_name) {
 void operation_end(const int operation_status) {
   time_t Stop;
   DataManager::SetValue("ui_progress", 100);
-  if (operation_status != 0) {
-    DataManager::SetValue("tw_operation_status", 1);
-  } else {
-    DataManager::SetValue("tw_operation_status", 0);
-  }
-  DataManager::SetValue("tw_operation_state", 1);
   DataManager::SetValue(TW_ACTION_BUSY, 0);
   operation_ended.store(true);
   property_set("twrp.action_complete", "1");

@@ -22,7 +22,7 @@ struct graphics_state {
 
 bool initialize_graphics(const gui2_context* context, graphics_state* state,
                          uint32_t (*tick_callback)(void));
-void shutdown_graphics(graphics_state* state, bool keep_display);
+void shutdown_graphics(graphics_state* state);
 
 }  // namespace gui2_app
 

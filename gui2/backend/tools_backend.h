@@ -6,7 +6,7 @@
 
 namespace gui2_backend {
 
-// What the legacy getpartitiondetails action fills in for one partition.
+// Partition details and supported file systems for GUI2.
 struct partition_details {
   std::string name;
   std::string mount_point;
@@ -23,7 +23,7 @@ struct partition_details {
   std::vector<std::string> file_systems;
 };
 
-// The one-off jobs the legacy theme runs through confirm_action.
+// Recovery jobs exposed by the GUI2 tools backend.
 enum class tool_job {
   REPAIR,
   RESIZE,
@@ -54,7 +54,7 @@ enum class tool_state {
   FAILED,
 };
 
-// Which advanced rows the legacy theme would show on this device.
+// Advanced tool capabilities available on this device.
 struct tool_availability {
   bool twrp_folder = false;
   bool fix_recovery_bootloop = false;

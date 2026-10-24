@@ -11,7 +11,7 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 - 保持滚动、动画、阴影和渐变等视觉效果。
 - 使用 TinyTTF 动态渲染字体，支持中英文及不同字号。
 - 将状态栏、页面顶栏、内容区和底部导航统一为可复用脚手架。
-- 与现有 TWRP recovery 能力逐步衔接，避免一次性破坏旧 GUI。
+- 通过 backend 接入现有 TWRP recovery 能力，GUI2 是唯一图形界面。
 
 ## 设计理念
 
@@ -28,7 +28,7 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 3. 建立页面与组件模型，逐步实现安装、清除、备份、恢复、挂载、高级和设置等页面。
 4. 完善 i18n、字体、主题和设备安全区适配。
 5. 将现有 recovery 操作能力接入 GUI2 页面。
-6. 以 GUI2 作为 recovery 默认主界面，同时保留旧 GUI 作为当前进程内的兼容回退。
+6. 以 GUI2 作为 recovery 唯一主界面，移除旧 GUI 和回退入口。
 
 ## 当前进度
 
@@ -43,12 +43,12 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 - 页面内容在浮动导航下方连续延伸，并由 shell 提供局部透明黑渐变遮罩；遮罩必须位于滚动内容之上、导航控件之下，且不得带 border、outline 或 shadow。
 - 返回、主页和页面路由逻辑。
 - 页面 PUSH/POP/REPLACE 过渡动画：前进时新页面从右侧进入，返回时新页面从左侧进入；动画期间页面内容暂时阻止输入，固定状态栏和底部导航保持不动。
-- 主页功能卡片、通用操作占位页面以及设置、语言、时区和硬件页面。
+- 主页功能卡片、操作页面以及设置、语言、时区和硬件页面。
 - 重启页面：通过底栏 Power 按钮进入，支持 System、Power Off、Recovery、Fastbootd、Bootloader、Download 和 EDL；每个目标按编译参数决定是否显示，点击后使用带箭头的滑块确认。
 - 重启页面的 A/B 槽位区域：只有编译启用 `AB_OTA_UPDATER` 且运行时存在有效 `A/B` 活动槽位时显示；槽位切换复用 recovery 的 boot control 逻辑。
 - 英文、简体中文和繁体中文 i18n。
 - TinyTTF 动态字号和中文字体渲染。
-- `libgui2` 静态库及 `gui2_start()` 公共入口。
+- `libgui2` 共享库及 `gui2_start()` 公共入口。
 - `gui2/backend/` 中与 LVGL 解耦的设置存储和状态采集接口。
 - recovery DataManager 适配器：持久化设置继续使用 `.twrp_settings`。
 - 真实时间、电量、充电状态及 12/24 小时制显示。
@@ -56,14 +56,14 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 - 屏幕能力 backend：旧 GUI 兼容的 PNG 截屏、自动/手动熄屏与触摸唤醒。
 - 内置无音频 VP8/WebM 录屏：支持 15/24/30/45/60 FPS、有界丢帧队列和后台编码，不依赖 Android 媒体服务。
 - shell 级状态栏下拉快捷菜单：截屏、熄屏和开始/停止录屏，录制状态同步显示在状态栏。
-- recovery 默认 GUI2 启动、初始化失败回退，以及运行时切换到旧 GUI。
+- recovery 仅启动 GUI2；初始化或启动失败会清理资源并返回错误，不回退或执行正常重启。
 - GUI2 已完成首轮模块化重构：入口 `gui2.cpp` 负责 recovery 业务回调和组装，`app/` 管理生命周期/主循环，`shell/` 管理持久系统层，`pages/` 管理页面，`components/` 管理可复用控件，`core/` 管理通用 UI 基础设施，`theme/` 管理字体资源，`backend/` 管理 recovery/system 能力。
-- 重启能力已经通过 `backend/reboot_backend` 注入 GUI2；确认后写入旧 GUI 使用的重启状态并退出 GUI2，由 `twrp.cpp` 统一完成最终同步、卸载和重启。
+- 重启能力已经通过 `backend/reboot_backend` 注入 GUI2；确认后写入 `tw_reboot_arg` 并设置 GUI2 自有退出状态，由 `twrp.cpp` 统一完成最终同步、卸载和重启。
 
 当前边界：
 
-- 启动前仍需短暂初始化旧 GUI，以支持现有解密、只读确认等 recovery 前置页面；随后会释放旧 GUI 的资源再进入 GUI2。
-- 重启和 A/B 槽位切换已经接入；安装、清除、备份、恢复、挂载和高级工具等真实 recovery 操作尚未全部接入 GUI2 页面。
+- 启动、解密和只读确认均由 GUI2 页面与 startup backend 处理，不初始化旧 GUI。
+- 安装、清除、备份、恢复、挂载、终端等操作通过对应 recovery backend 接入 GUI2；功能验证以当前代码和真机结果为准。
 
 ## 注意事项
 
@@ -80,7 +80,7 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
   ```
 
 - 每次生成最终 `recoveryimage` 前必须先执行 `mka installclean`；增量编译单独验证模块时可按需使用目标模块构建。
-- 最近验证命令和结果：
+- 旧 GUI 移除前的历史验证命令和结果（不代表本次改动已构建验证）：
 
   ```bash
   git diff --check                         # 通过（在 bootable/recovery 执行）
@@ -125,7 +125,7 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 - GUI2 使用 `/twres` 中的运行时字体资源和 backend，不针对单一设备硬编码分辨率、圆角安全区或字号。
 - 全局尺寸统一使用 `gui2_core::ui_metrics::scale` 和 `gui2_core::ui_px()`；手机缩放基准为短边 1200px，最小/最大比例仅作保护，不能给高分辨率布局保留未缩放的固定上限。新增 shell、卡片或组件尺寸必须接入这套缩放。
 - 大屏（`gr_fb_physical_size()` 报告的面板短边 ≥ 100 mm，平板、折叠屏内屏）按物理密度缩放，`ui.large_screen` 为真；面板尺寸未知时一律按手机处理。大屏内容区限宽居中：横向定位用 `ui.content_left`，`outer_margin` 只作间距；卡片列表容器调用 `set_card_grid()`，卡片宽度取 `card_width_in(parent)`，同行卡片由 `page_host::settle()` 统一等高。手机横屏不做专门适配。
-- GUI2 不支持旧 GUI 的主题导入、`ui.xml` 自定义主题和主题重载；这些逻辑继续由旧 GUI 独立维护。
+- GUI2 不支持旧 XML 主题导入、`ui.xml` 自定义主题和主题重载；安装器将旧主题 ZIP 视为无效安装包。字体由 `gui2/resources/fonts/` 安装到 `/twres/fonts`。消息译文使用现有 `language_pack` 的对应消息字段，统一维护在 `en.cpp`、`zh_cn.cpp`、`zh_tw.cpp`、`ru.cpp`，不读取 XML 语言包，不受 `TW_EXTRA_LANGUAGES` 控制。`gui2/console` 负责类型化消息、格式化和历史记录；原始 printf/标签查询适配位于 `gui2/console/stdio_adapter.*`，PTY 引擎位于 `gui2/backend/terminal_engine.*`，通用 XML 工具位于 `gui2/backend/xml/`，RapidXML 位于 `gui2/third_party/`。字体安装 Soong 插件位于 `gui2/resources/`。
 - `gui2/` 内源文件不添加许可证文件头；构建系统中的模块许可证声明仍按 Android.bp 规范保留。
 
 ### 页面与交互
@@ -161,7 +161,7 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 - 所有重启和槽位操作必须通过 `backend/reboot_backend`；页面不得直接访问 DataManager、PartitionManager、TWFunc、minui 或 sysfs。
 - 重启目标能力必须同时遵循编译参数和旧 GUI 语义：`TW_NO_REBOOT_RECOVERY`、`TW_NO_REBOOT_BOOTLOADER`、`TW_INCLUDE_FASTBOOTD`、`PRODUCT_USE_DYNAMIC_PARTITIONS`、`TW_HAS_DOWNLOAD_MODE`、`TW_HAS_EDL_MODE` 和 `AB_OTA_UPDATER`。不可用目标隐藏，不创建“不可用”卡片。
 - A/B 槽位卡片不能只依据 `AB_OTA_UPDATER`；还必须确认运行时 `ro.boot.slot_suffix` 对应有效的 `A` 或 `B`，从而兼容 A-only、传统 A/B 和 Virtual A/B 设备。
-- 重启确认只写入旧 GUI 使用的 `tw_reboot_arg` 和 `tw_gui_done`，由 GUI2 退出后交给 `twrp.cpp` 的统一重启流程执行；页面和滑块不得直接触发设备重启。
+- 重启确认只写入 `tw_reboot_arg` 并设置 GUI2 自有退出状态，不写入 `tw_gui_done`；退出后交给 `twrp.cpp` 的统一重启流程执行；页面和滑块不得直接触发设备重启。
 - 硬件滑块变化时可实时更新硬件和内存状态，但不得为每个 `LV_EVENT_VALUE_CHANGED` 调用 `Flush()`；在 `LV_EVENT_RELEASED` 或等价结束事件统一落盘。
 - 亮度沿用 `tw_brightness` / `tw_brightness_pct` 和 TWRP 最大值映射；震动沿用 `tw_button_vibrate`、`tw_keyboard_vibrate`、`tw_action_vibrate`，不得引入 GUI2 私有配置键。
 - 修改时区按旧 GUI 的 `Zone[:offset][DSTZone]` 规则构造 `tw_time_zone`，然后更新环境并 `flush()`。
@@ -169,12 +169,12 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 - 录屏档位不得超过编译期 `TW_FRAMERATE`；backend、界面和录屏采样必须使用同一有效上限。
 - 录屏帧率改变时只更新 backend 的内存配置，不能在每个滑块事件中 `Flush()`，只在释放滑块时统一保存。
 
-### 生命周期与旧 GUI
+### 生命周期与退出
 
 - GUI2 的 display/input/font/LVGL 生命周期由 `app/gui2_lifecycle` 统一管理；Shell controller 的 timer 必须在 LVGL 销毁前停止，backend worker 必须在 owner 的 `stop()` 中停止并 join。
 - 截图/熄屏请求通过 `app/screen_actions` 排队，在本轮 present 后执行；截图白闪由 `shell/screen_feedback` 管理。页面和快捷按钮不得直接调用 screenshot、screen-off 或 minui。
-- GUI2 切换旧 GUI 不写入界面选择配置；退出前必须停止状态线程、释放 LVGL 和输入资源。若是 GUI2→旧 GUI 的即时切换，必须保留已经工作的 minui/DRM 实例，由旧 GUI 只重建资源和输入，不能再次 modeset；只有 GUI2 完全退出或初始化失败时才释放 minui。
-- 解密等前置页面会让 minui/DRM 在同一 recovery 进程内经历二次初始化；确实退出 DRM backend 时必须释放 CRTC、connector、plane、property 和 blob，并重置 blank/缓冲区状态，否则下一次 atomic commit 可能失败。GUI2 启动阶段不得额外调用屏幕唤醒同步。
+- GUI2 不提供旧 GUI 切换入口。正常退出和初始化失败均使用统一清理路径，停止 worker/controller 并释放 LVGL、输入与 minui；资源释放统一由生命周期 owner 执行。
+- 解密和只读确认复用 GUI2 生命周期，不重建 minui/DRM。退出 DRM backend 时必须释放 CRTC、connector、plane、property 和 blob，并重置 blank/缓冲区状态。GUI2 启动阶段不得额外调用屏幕唤醒同步。
 
 ### 屏幕能力与快捷菜单
 
@@ -195,3 +195,22 @@ GUI2 是基于 LVGL 的 TWRP 新一代触摸界面，目标是提供适合现代
 - 截图提示应使用低不透明度、短时的柔和闪烁；不得使用长时间全屏纯白覆盖，避免刺眼和影响用户观察。
 - 快捷操作按钮内的图标和文本必须先作为一个内容组计算真实高度（包括多行文本），再在按钮内部水平/垂直居中，并保留一致的内边距；禁止分别锚定到按钮顶部和底部。
 - 存储路径、文件权限和截屏格式复用旧 GUI；存储不可用时使用 `/tmp/`，新增持久化设置仍只能经由 backend 写入 DataManager。
+
+### Backend 临时状态
+
+- 分区详情直接填充 `partition_details`，不得经由 `tw_partition_*` 全局变量写入后读回。
+- 工具任务、镜像路径和恢复目录在启动 worker 时按值捕获；解密密码直接使用 worker 参数，不写入 `tw_crypto_password`。
+- 操作结果、备份取消结果和侧载取消按钮由 backend/page 状态管理，不写入旧页面状态 `tw_operation_state`、`tw_operation_status`、`tw_cancel_backup` 或 `tw_has_cancel`。
+- 仍需保留 recovery 核心消费的 `tw_flash_partition`、`tw_restore_selected`、`tw_restore_password`，以及进度、忙状态和持久化设置。ORS 与 CLI 的 `tw_page_done` 协议独立保留。
+
+### 控制台消息与 i18n
+
+- recovery 消息使用 `gui2/console/messages.h` 的 `info/warning/log_error/highlight(key, args...)`；只需要返回字符串时使用 `format(key, args...)` 或 `text(key)`。不要新增 Msg、链式参数对象或 XML 消息加载。
+- 控制台消息字段追加在 `language_pack` 末尾，四个现有语言文件必须按同一顺序追加译文；语言文本后不添加逐行字段注释，以保留 IDE 成员名提示。消息字段不使用 `console_` 前缀；仅在与现有不同语义字段重名时使用 `_message` 后缀。`i18n.cpp` 只维护一张排序的 key → 成员指针映射，不另外建立消息译文表。新增消息必须补齐四语言，保留相同的参数类型与位置；使用 `%s`、`%d`、`%u` 和 `%%`，重排参数使用 `%2$s` 等位置形式，不得混用位置与顺序形式。
+- 消息历史保留键、严重级别和自有参数副本；原始 printf 输出与本地化消息在一个顺序中保存，切换语言后只重绘历史，不重新输出到 stdout/CLI。
+- 选择语言经 console state 同步，不能由工作线程读取 UI 的非原子语言全局变量。启动 worker 退出后再次翻译分区名称，避免与启动期分区初始化并发。
+- `gui2/console/tests/validate_catalogues.py` 可在不编译的情况下检查完整语言初始化数量、声明与映射顺序及四语言格式签名。C++20 主机测试目标为 `gui2_console_messages_test`，覆盖格式化、历史、输出镜像和并发；按用户当前要求，不自动执行任何构建。
+
+- 当前格式化委托给 `std::snprintf`，由两次调用测长和输出；消息历史通过闭包保存自有 `std::tuple`，再以 `std::apply` 展开。不要恢复手写格式解析器或 `std::variant` 参数格式化。
+- 数值参数保留真实 C++ 类型，调用方必须遵守 printf ABI：`%d` 对应 `int`、`%u` 对应 `unsigned`、`%llu` 对应 `unsigned long long`。四语言校验同时检查位置、符号类型和长度修饰符。字符串参数在持有副本后才转换为 `c_str()`；`char` 按现有消息表约定作为 `%s` 的单字符字符串。
+- 后续统一迁移到 `std::format` 时再转换内部模板语法；当前仍保留 `%` 模板及现有 key-based 输出接口。

@@ -41,7 +41,6 @@ struct runtime_state {
   gui2_backend::startup_backend* startup = nullptr;
   gui2_backend::tools_backend* tools = nullptr;
   gui2_backend::background_backend* background = nullptr;
-  bool switch_to_legacy = false;
   bool reboot_requested = false;
 };
 

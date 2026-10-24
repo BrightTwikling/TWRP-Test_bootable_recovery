@@ -27,7 +27,7 @@ extern "C" {
 #include <vector>
 #include "exclude.hpp"
 #include "twrp_functions.hpp"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "twcommon.h"
 
 using namespace std;
@@ -69,7 +69,7 @@ uint64_t TWExclude::Get_Folder_Size(const string& Path, bool Display_Error, cons
 	d = opendir(Path.c_str());
 	if (d == NULL) {
 		if (Display_Error)
-			gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(Path)(strerror(errno)));
+			gui2_console::log_error("error_opening_strerr", Path, strerror(errno));
 		return 0;
 	}
 
@@ -78,7 +78,7 @@ uint64_t TWExclude::Get_Folder_Size(const string& Path, bool Display_Error, cons
 		FullPath += de->d_name;
 		if (lstat(FullPath.c_str(), &st)) {
 			if (Display_Error)
-				gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(FullPath)(strerror(errno)));
+				gui2_console::log_error("error_opening_strerr", FullPath, strerror(errno));
 			LOGINFO("Real error: Unable to stat '%s'\n", FullPath.c_str());
 			continue;
 		}

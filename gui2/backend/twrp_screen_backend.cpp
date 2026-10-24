@@ -13,8 +13,8 @@
 
 #include "backlight_controller.h"
 #include "data.hpp"
-#include "gui/gui.hpp"
-#include "gui/twmsg.h"
+#include "gui2/console/stdio_adapter.h"
+#include "gui2/console/messages.h"
 #include "partitions.hpp"
 #include "twrp_functions.hpp"
 #include "twrp_operation.h"
@@ -137,10 +137,10 @@ capture_result twrp_screen_backend::save_screenshot() {
     chmod(path, 0666);
     chown(path, uid, gid);
 
-    gui_msg(Msg("screenshot_saved=Screenshot was saved to {1}")(path));
+    gui2_console::info("screenshot_saved", path);
     return { true, path, {} };
   }
-  gui_err("screenshot_err=Failed to take a screenshot!");
+  gui2_console::log_error("screenshot_err");
   return { false, path, "Unable to save screenshot" };
 }
 
@@ -325,9 +325,9 @@ capture_result twrp_screen_backend::start_recording() {
                    : recorder_.start(path, width, height, recording_fps(),
                                      last_tick_ms_ == 0 ? 0 : last_tick_ms_);
   if (result.success)
-    gui_msg(Msg("screenrecord_started=Screen recording started: {1}")(path));
+    gui2_console::info("screenrecord_started", path);
   else
-    gui_err("screenrecord_start_err=Unable to start screen recording!");
+    gui2_console::log_error("screenrecord_start_err");
   return result;
 }
 
@@ -340,9 +340,9 @@ capture_result twrp_screen_backend::stop_recording() {
       result = { false, result.path, "Unable to set recording permissions" };
   }
   if (result.success)
-    gui_msg(Msg("screenrecord_saved=Screen recording was saved to {1}")(result.path));
+    gui2_console::info("screenrecord_saved", result.path);
   else
-    gui_err("screenrecord_save_err=Failed to save the screen recording!");
+    gui2_console::log_error("screenrecord_save_err");
   return result;
 }
 

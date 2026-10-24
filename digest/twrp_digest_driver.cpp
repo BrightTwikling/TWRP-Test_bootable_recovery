@@ -38,7 +38,7 @@
 #include <android-base/unique_fd.h>
 
 #include "data.hpp"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "set_metadata.h"
 #include "twcommon.h"
 #include "twrp_functions.hpp"
@@ -101,12 +101,12 @@ bool TwrpDigestDriver::CheckFileDigest(const std::string& filename) {
     if (fd < 0) {
       // ENOENT = try next suffix; other errors must not pass for "no digest file".
       if (errno == ENOENT) continue;
-      gui_msg("digest_error=Digest Error!");
+      gui2_console::info("digest_error");
       return false;
     }
     // ReadFdToString clears stored_digest (no pre-clear needed).
     if (!android::base::ReadFdToString(fd.get(), &stored_digest)) {
-      gui_msg("digest_error=Digest Error!");
+      gui2_console::info("digest_error");
       return false;
     }
     found = true;
@@ -114,20 +114,20 @@ bool TwrpDigestDriver::CheckFileDigest(const std::string& filename) {
   }
 
   if (!found) {
-    gui_msg(Msg(msg::kWarning, "no_digest=Skipping Digest check: no Digest file found"));
+    gui2_console::warning("no_digest");
     return true;
   }
 
   const std::optional<StoredDigest> stored = ParseStoredDigest(stored_digest);
   if (!stored) {
-    gui_msg("digest_error=Digest Error!");
+    gui2_console::info("digest_error");
     return false;
   }
 
   // Bind by basename before the multi-GB hash.
   const std::string file_name = TWFunc::GetFilename(filename);
   if (TWFunc::GetFilename(stored->name) != file_name) {
-    gui_msg(Msg(msg::kError, "digest_fail_match=Digest failed to match on '{1}'.")(filename));
+    gui2_console::log_error("digest_fail_match", filename);
     return false;
   }
 
@@ -137,13 +137,13 @@ bool TwrpDigestDriver::CheckFileDigest(const std::string& filename) {
   // Empty HexDigest (hash failed) can't equal a 32/64-char stored hex.
   const std::string computed_digest = digest.HexDigest();
   if (!android::base::EqualsIgnoreCase(computed_digest, stored->hex)) {
-    gui_msg(Msg(msg::kError, "digest_fail_match=Digest failed to match on '{1}'.")(filename));
+    gui2_console::log_error("digest_fail_match", filename);
     return false;
   }
 
   LOGINFO("%s Digest: %s  %s\n", AlgorithmName(stored->algorithm), computed_digest.c_str(),
           file_name.c_str());
-  gui_msg(Msg("digest_matched=Digest matched for '{1}'.")(filename));
+  gui2_console::info("digest_matched", filename);
   return true;
 }
 
@@ -182,18 +182,18 @@ bool TwrpDigestDriver::WriteDigest(const std::string& full_filename) {
   LOGINFO("digest_filename: %s\n", digest_filename.c_str());
 
   if (!TWFunc::WriteToFile(digest_filename, std::format("{}  {}\n", digest_str, file_name))) {
-    gui_err("digest_error= * Digest Error!");
+    gui2_console::log_error("digest_error");
     return false;
   }
 
   tw_set_default_metadata(digest_filename.c_str());
-  gui_msg("digest_created= * Digest Created.");
+  gui2_console::info("digest_created");
   return true;
 }
 
 bool TwrpDigestDriver::MakeDigest(const std::string& full_filename) {
-  TWFunc::GuiOperationText(TW_GENERATE_DIGEST_TEXT, gui_parse_text("{@generating_digest1}"));
-  gui_msg("generating_digest2= * Generating digest...");
+  TWFunc::GuiOperationText(TW_GENERATE_DIGEST_TEXT, gui2_console::text("generating_digest1"));
+  gui2_console::info("generating_digest2");
 
   if (TWFunc::IsPathExists(full_filename)) return WriteDigest(full_filename);
 
@@ -211,7 +211,7 @@ bool TwrpDigestDriver::MakeDigest(const std::string& full_filename) {
     if (!WriteDigest(split_filename)) return false;
   }
 
-  gui_msg("digest_created= * Digest Created.");
+  gui2_console::info("digest_created");
   return true;
 }
 

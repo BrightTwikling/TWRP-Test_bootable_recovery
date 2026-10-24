@@ -39,8 +39,6 @@ lock_kind twrp_decrypt_backend::kind() {
 
 void twrp_decrypt_backend::select_user() {
   DataManager::SetValue("tw_crypto_user_id", "0");
-  DataManager::SetValue("tw_crypto_password", "");
-  DataManager::SetValue("tw_password_fail", 0);
   DataManager::SetValue(TW_CRYPTO_PWTYPE, DataManager::GetStrValue("tw_crypto_pwtype_0"));
 }
 
@@ -87,22 +85,18 @@ void twrp_decrypt_backend::run_refresh() {
   running_.store(false);
 }
 
-// GUIAction::decrypt; the password comes from the page instead of the input
-// widget's tw_crypto_password.
+// The worker owns its password; do not publish it through global UI state.
 void twrp_decrypt_backend::run(std::string password) {
   int op_status = 0;
-  DataManager::SetValue("tw_crypto_password", password);
 
   operation_start("Decrypt");
   {
-    std::string Password;
     std::string userID;
-    DataManager::GetValue("tw_crypto_password", Password);
 
     if (DataManager::GetIntValue(TW_IS_FBE)) {  // for FBE
       DataManager::GetValue("tw_crypto_user_id", userID);
       if (userID != "") {
-        op_status = PartitionManager.DecryptDevice(Password, atoi(userID.c_str()));
+        op_status = PartitionManager.DecryptDevice(password, atoi(userID.c_str()));
         if (userID != "0") {
           if (op_status != 0) op_status = 1;
           operation_end(op_status);
@@ -114,7 +108,7 @@ void twrp_decrypt_backend::run(std::string password) {
         op_status = 1;
       }
     } else {  // for FDE
-      op_status = PartitionManager.DecryptDevice(Password);
+      op_status = PartitionManager.DecryptDevice(password);
     }
 
     if (op_status != 0)
@@ -126,7 +120,7 @@ void twrp_decrypt_backend::run(std::string password) {
 
       int has_datamedia;
 
-      // Check for a custom theme and load it if exists
+      // Refresh storage metadata after unlocking data.
       DataManager::GetValue(TW_HAS_DATA_MEDIA, has_datamedia);
       if (has_datamedia != 0) {
         if (tw_get_default_metadata(DataManager::GetCurrentStoragePath().c_str()) != 0) {

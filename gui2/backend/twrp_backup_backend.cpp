@@ -1,8 +1,9 @@
 #include "twrp_backup_backend.h"
 
 #include "data.hpp"
-#include "gui/gui.hpp"
-#include "gui/twmsg.h"
+#include "gui2/console/stdio_adapter.h"
+#include "gui2/console/messages.h"
+#include "gui2/i18n/i18n.h"
 #include "partitions.hpp"
 #include "twrp_functions.hpp"
 #include "twrp_operation.h"
@@ -67,29 +68,30 @@ bool twrp_backup_backend::start() {
   return true;
 }
 
-// GUIAction::nandroid("backup")
+// Run the backup and publish its result through backend state.
 void twrp_backup_backend::run() {
   operation_start("Nandroid");
   int ret = 0;
   bool name_ok = true;
+  bool cancelled = false;
 
   std::string Backup_Name;
   DataManager::GetValue(TW_BACKUP_NAME, Backup_Name);
   std::string auto_gen = gui_lookup("auto_generate", "(Auto Generate)");
-  if (Backup_Name == auto_gen || Backup_Name == gui_lookup("curr_date", "(Current Date)") ||
+  if (gui2_i18n::matches_message("auto_generate", Backup_Name) ||
+      gui2_i18n::matches_message("curr_date", Backup_Name) ||
       Backup_Name == "0" || Backup_Name == "(" ||
       PartitionManager.IsBackupNameValid(Backup_Name, true, true)) {
     ret = PartitionManager.RunBackup();
     DataManager::SetValue("tw_encrypt_backup", 0);  // reset value so we don't encrypt every subsequent backup
-    if (!PartitionManager.stop_backup) {
+    cancelled = PartitionManager.stop_backup;
+    if (!cancelled) {
       if (ret == false)
         ret = 1;  // 1 for failure
       else
         ret = 0;  // 0 for success
-      DataManager::SetValue("tw_cancel_backup", 0);
     } else {
-      DataManager::SetValue("tw_cancel_backup", 1);
-      gui_msg("backup_cancel=Backup Cancelled");
+      gui2_console::info("backup_cancel");
       ret = 0;
     }
   } else {
@@ -105,7 +107,7 @@ void twrp_backup_backend::run() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!name_ok || ret != 0)
       state_ = backup_state::FAILED;
-    else if (DataManager::GetIntValue("tw_cancel_backup") != 0)
+    else if (cancelled)
       state_ = backup_state::CANCELLED;
     else
       state_ = backup_state::DONE;

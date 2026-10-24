@@ -65,7 +65,7 @@
 #include "exclude.hpp"
 #include "infomanager.hpp"
 #include "set_metadata.h"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "unit_conversion.hpp"
 #include "twrp_operation_executor.h"
 
@@ -1084,9 +1084,7 @@ bool TWPartition::MakeDir(const std::string& path, const bool display_error) {
   if (!TWFunc::IsPathExists(path)) {
     if (mkdir(path.c_str(), 0777) == -1) {
       if (display_error)
-        gui_msg(
-            Msg(msg::kError, "create_folder_strerr=Can not create '{1}' folder ({2}).")(path)(
-                strerror(errno)));
+        gui2_console::log_error("create_folder_strerr", path, strerror(errno));
       else
         LOGINFO("Can not create '%s' folder.\n", path.c_str());
       return false;
@@ -1441,8 +1439,7 @@ bool TWPartition::MountFilesystem(const bool display_error) {
             mount_options_.c_str()) != 0 &&
       mount(actual_block_device_.c_str(), mount_point_.c_str(), mount_fs.c_str(), flags,
             nullptr) != 0) {
-    if (!removable_ && display_error) gui_msg(
-        Msg(msg::kError, "fail_mount=Failed to mount '{1}' ({2})")(mount_point_)(strerror(errno)));
+    if (!removable_ && display_error) gui2_console::log_error("fail_mount", mount_point_, strerror(errno));
     else
       LOGINFO("Unable to mount '%s'\n", mount_point_.c_str());
 
@@ -1578,8 +1575,7 @@ bool TWPartition::Unmount(const bool display_error, const int flags) const {
   }
   if (is_storage_ && mtp_storage_id_ > 0) TWPartitionManager::AddMtpStorage(mtp_storage_id_);
   if (display_error)
-    gui_msg(Msg(msg::kError, "fail_unmount=Failed to unmount '{1}' ({2})")(mount_point_)(
-        strerror(umount_err)));
+    gui2_console::log_error("fail_unmount", mount_point_, strerror(umount_err));
   else
     LOGINFO("Unable to unmount '%s'\n", mount_point_.c_str());
   return false;
@@ -1634,15 +1630,13 @@ bool TWPartition::Wipe(const std::string& new_file_system) {
   bool wiped = false, update_crypt = false;
 
   if (!can_be_wiped_) {
-    gui_msg(Msg(msg::kError, "cannot_wipe=Partition {1} cannot be wiped.")(display_name_));
+    gui2_console::log_error("cannot_wipe", display_name_);
     return false;
   }
 
   if (mount_point_ == TWPartitionManager::GetAndroidRootPath()) {
     if (tw_get_default_metadata(TWPartitionManager::GetAndroidRootPath().c_str()) != 0) {
-      gui_msg(Msg(msg::kWarning,
-                  "restore_system_context=Unable to get default context for {1} -- Android may not boot.")(
-          TWPartitionManager::GetAndroidRootPath()));
+      gui2_console::warning("restore_system_context", TWPartitionManager::GetAndroidRootPath());
     }
   }
 
@@ -1709,14 +1703,14 @@ bool TWPartition::WipeAndSec() {
 
   if (!Mount(true)) return false;
 
-  gui_msg(Msg("wiping=Wiping {1}")(backup_display_name_));
+  gui2_console::info("wiping", backup_display_name_);
   TWFunc::RemoveDir(mount_point_ + "/.android_secure/", true);
   return true;
 }
 
 bool TWPartition::WipeDataCache() {
   if (!Mount(true)) return false;
-  gui_msg(Msg("wiping=Wiping {1}")(mount_point_ + "/cache/"));
+  gui2_console::info("wiping", mount_point_ + "/cache/");
   TWFunc::RemoveDir(mount_point_ + "/cache/", true);
   return true;
 }
@@ -1747,11 +1741,11 @@ bool TWPartition::Repair() {
     std::string full = "/system/bin/";
     full += binary;
     if (!TWFunc::IsPathExists(full)) {
-      gui_msg(Msg(msg::kError, "repair_not_exist={1} does not exist! Cannot repair!")(error_name));
+      gui2_console::log_error("repair_not_exist", error_name);
       return false;
     }
     if (!Unmount(true)) return false;
-    gui_msg(Msg("repairing_using=Repairing {1} using {2}...")(display_name_)(binary));
+    gui2_console::info("repairing_using", display_name_, binary);
     FindActualBlockDevice();
     std::string command = full;
     if (*flags) {
@@ -1762,10 +1756,10 @@ bool TWPartition::Repair() {
     command += actual_block_device_;
     LOGINFO("Repair command: %s\n", command.c_str());
     if (TWFunc::ExecCmd(command) == 0) {
-      gui_msg("done=Done.");
+      gui2_console::info("done");
       return true;
     }
-    gui_msg(Msg(msg::kError, "unable_repair=Unable to repair {1}.")(display_name_));
+    gui2_console::log_error("unable_repair", display_name_);
     return false;
   };
 
@@ -1780,7 +1774,7 @@ bool TWPartition::Repair() {
     if (TWFunc::IsPathExists("/system/bin/ntfsfix")) ntfsfix_binary = "ntfsfix";
     else if (TWFunc::IsPathExists("/system/bin/fsck.ntfs")) ntfsfix_binary = "fsck.ntfs";
     else {
-      gui_msg(Msg(msg::kError, "repair_not_exist={1} does not exist! Cannot repair!")("ntfsfix"));
+      gui2_console::log_error("repair_not_exist", "ntfsfix");
       return false;
     }
     return do_repair(ntfsfix_binary.c_str(), "", "ntfsfix");
@@ -1806,18 +1800,18 @@ bool TWPartition::Resize() {
       LOGINFO("Cannot resize %s because %s cannot be repaired before resizing.\n",
               display_name_.c_str(),
               display_name_.c_str());
-      gui_msg(Msg(msg::kError, "cannot_resize=Cannot resize {1}.")(display_name_));
+      gui2_console::log_error("cannot_resize", display_name_);
       return false;
     }
     if (!TWFunc::IsPathExists("/system/bin/resize2fs")) {
       LOGINFO("resize2fs does not exist! Cannot resize!\n");
-      gui_msg(Msg(msg::kError, "cannot_resize=Cannot resize {1}.")(display_name_));
+      gui2_console::log_error("cannot_resize", display_name_);
       return false;
     }
     // Repair will unmount so no need to do it twice
-    gui_msg(Msg("repair_resize=Repairing {1} before resizing.")(display_name_));
+    gui2_console::info("repair_resize", display_name_);
     if (!Repair()) return false;
-    gui_msg(Msg("resizing=Resizing {1} using {2}...")(display_name_)("resize2fs"));
+    gui2_console::info("resizing", display_name_, "resize2fs");
     FindActualBlockDevice();
     command = "/system/bin/resize2fs " + actual_block_device_;
     if (length_ != 0) {
@@ -1837,11 +1831,11 @@ bool TWPartition::Resize() {
     LOGINFO("Resize command: %s\n", command.c_str());
     if (TWFunc::ExecCmd(command) == 0) {
       UpdateSize(true);
-      gui_msg("done=Done.");
+      gui2_console::info("done");
       return true;
     }
     UpdateSize(true);
-    gui_msg(Msg(msg::kError, "unable_resize=Unable to resize {1}.")(display_name_));
+    gui2_console::log_error("unable_resize", display_name_);
     return false;
   }
   return false;
@@ -1860,7 +1854,7 @@ bool TWPartition::Backup(PartitionSettings* part_settings, pid_t* tar_fork_pid) 
 }
 
 bool TWPartition::Restore(PartitionSettings* part_settings) {
-  TWFunc::GuiOperationText(TW_RESTORE_TEXT, display_name_, gui_parse_text("{@restoring_hdr}"));
+  TWFunc::GuiOperationText(TW_RESTORE_TEXT, display_name_, gui2_console::text("restoring_hdr"));
   LOGINFO("Restore filename is: %s/%s\n", part_settings->backup_folder.c_str(),
           backup_file_name_.c_str());
 
@@ -1920,7 +1914,7 @@ bool TWPartition::WipeEncryption() {
   FindActualBlockDevice();
   if (!is_present_) {
     LOGINFO("Block device not present, cannot format %s.\n", display_name_.c_str());
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
 
@@ -1960,10 +1954,9 @@ bool TWPartition::WipeEncryption() {
   if (Wipe(fstab_file_system_)) {
     has_data_media_ = save_data_media;
     DataManager::SetValue(TW_IS_ENCRYPTED, 0);
-    gui_msg("format_data_msg=You may need to reboot recovery to be able to use /data again.");
+    gui2_console::info("format_data_msg");
     if (is_fbe_) {
-      gui_msg(Msg(msg::kWarning,
-                  "data_media_fbe_msg=TWRP will not recreate /data/media on an FBE device. Please reboot into your rom to create /data/media."));
+      gui2_console::warning("data_media_fbe_msg");
     } else {
       if (has_data_media_ && !symlink_mount_point_.empty()) {
         if (Mount(false)) TWPartitionManager::AddMtpStorage(mtp_storage_id_);
@@ -1976,7 +1969,7 @@ bool TWPartition::WipeEncryption() {
     return ret;
   }
   has_data_media_ = save_data_media;
-  gui_err("format_data_err=Unable to format to remove encryption.");
+  gui2_console::log_error("format_data_err");
   if (has_data_media_ && Mount(false)) TWPartitionManager::AddMtpStorage(mtp_storage_id_);
   return ret;
 }
@@ -2034,7 +2027,7 @@ bool TWPartition::WipeExtfs(const std::string& file_system) {
   FindActualBlockDevice();
   if (!is_present_) {
     LOGINFO("Block device not present, cannot wipe %s.\n", display_name_.c_str());
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
 
@@ -2043,7 +2036,7 @@ bool TWPartition::WipeExtfs(const std::string& file_system) {
 
   const std::string size_str = std::to_string(dev_sz / 4096);
 
-  gui_msg(Msg("formatting_using=Formatting {1} using {2}...")(display_name_)("mke2fs"));
+  gui2_console::info("formatting_using", display_name_, "mke2fs");
 
   // Execute mke2fs to create empty ext4 filesystem
   std::string cmd = std::format("mke2fs -t {} -b 4096 -I 512", file_system);
@@ -2054,7 +2047,7 @@ bool TWPartition::WipeExtfs(const std::string& file_system) {
   LOGINFO("mke2fs command: %s\n", cmd.c_str());
   int ret = TWFunc::ExecCmd(cmd);
   if (ret) {
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
 
@@ -2076,14 +2069,14 @@ bool TWPartition::WipeExtfs(const std::string& file_system) {
     LOGINFO("e2fsdroid command: %s\n", cmd.c_str());
     ret = TWFunc::ExecCmd(cmd);
     if (ret) {
-      gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+      gui2_console::log_error("unable_to_wipe", display_name_);
       return false;
     }
   }
 
   current_file_system_ = file_system;
   RecreateAndSecFolder();
-  gui_msg("done=Done.");
+  gui2_console::info("done");
   return true;
 }
 
@@ -2096,7 +2089,7 @@ bool TWPartition::WipeExt4() {
   FindActualBlockDevice();
   if (!is_present_) {
     LOGINFO("Block device not present, cannot wipe %s.\n", display_name_.c_str());
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
 
@@ -2105,7 +2098,7 @@ bool TWPartition::WipeExt4() {
 
   char* secontext = nullptr;
 
-  gui_msg(Msg("formatting_using=Formatting {1} using {2}...")(display_name_)("make_ext4fs"));
+  gui2_console::info("formatting_using", display_name_, "make_ext4fs");
 
   if (!selinux_handle || selabel_lookup(selinux_handle, &secontext, mount_point_.c_str(), S_IFDIR) <
       0) {
@@ -2116,7 +2109,7 @@ bool TWPartition::WipeExt4() {
     ret = make_ext4fs(actual_block_device_.c_str(), dev_sz, mount_point_.c_str(), selinux_handle);
   }
   if (ret != 0) {
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   } else {
     std::string sedir = mount_point_ + "/lost+found";
@@ -2134,16 +2127,16 @@ bool TWPartition::WipeFat() {
   if (!Unmount(true)) return false;
 
   if (TWFunc::IsPathExists("/system/bin/mkfs.fat")) {
-    gui_msg(Msg("formatting_using=Formatting {1} using {2}...")(display_name_)("mkfs.fat"));
+    gui2_console::info("formatting_using", display_name_, "mkfs.fat");
     FindActualBlockDevice();
     std::string cmd = "mkfs.fat " + actual_block_device_;
     if (TWFunc::ExecCmd(cmd) == 0) {
       current_file_system_ = "vfat";
       RecreateAndSecFolder();
-      gui_msg("done=Done.");
+      gui2_console::info("done");
       return true;
     }
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
   return WipeRmrf();
@@ -2153,14 +2146,14 @@ bool TWPartition::WipeExfat() {
   if (!Unmount(true)) return false;
 
   if (TWFunc::IsPathExists("/system/bin/mkfs.exfat")) {
-    gui_msg(Msg("formatting_using=Formatting {1} using {2}...")(display_name_)("mkfs.exfat"));
+    gui2_console::info("formatting_using", display_name_, "mkfs.exfat");
     FindActualBlockDevice();
     if (const std::string cmd = "mkfs.exfat " + actual_block_device_; TWFunc::ExecCmd(cmd) == 0) {
       RecreateAndSecFolder();
-      gui_msg("done=Done.");
+      gui2_console::info("done");
       return true;
     }
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
   return false;
@@ -2174,7 +2167,7 @@ bool TWPartition::WipeRmrf() {
   // partition.
   if (is_storage_) TWPartitionManager::RemoveMtpStorage(mtp_storage_id_);
 
-  gui_msg(Msg("remove_all=Removing all files under '{1}'")(mount_point_));
+  gui2_console::info("remove_all", mount_point_);
   TWFunc::RemoveDir(mount_point_, true);
   RecreateAndSecFolder();
   return true;
@@ -2197,7 +2190,7 @@ bool TWPartition::WipeF2fs() {
   FindActualBlockDevice();
   if (!is_present_) {
     LOGINFO("Block device not present, cannot wipe %s.\n", display_name_.c_str());
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
 
@@ -2225,10 +2218,10 @@ bool TWPartition::WipeF2fs() {
 
   if (TWFunc::ExecCmd(f2fs_command) == 0) {
     RecreateAndSecFolder();
-    gui_msg("done=Done.");
+    gui2_console::info("done");
     return true;
   }
-  gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+  gui2_console::log_error("unable_to_wipe", display_name_);
   return false;
 }
 
@@ -2241,14 +2234,14 @@ bool TWPartition::WipeNtfs() {
   else if (TWFunc::IsPathExists("/system/bin/mkfs.ntfs")) ntfsmake_binary = "mkfs.ntfs";
   else return false;
 
-  gui_msg(Msg("formatting_using=Formatting {1} using {2}...")(display_name_)(ntfsmake_binary));
+  gui2_console::info("formatting_using", display_name_, ntfsmake_binary);
   FindActualBlockDevice();
   if (const std::string cmd = "/system/bin/" + ntfsmake_binary + " " + actual_block_device_; TWFunc::ExecCmd(cmd) == 0) {
     RecreateAndSecFolder();
-    gui_msg("done=Done.");
+    gui2_console::info("done");
     return true;
   } else {
-    gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(display_name_));
+    gui2_console::log_error("unable_to_wipe", display_name_);
     return false;
   }
 }
@@ -2258,9 +2251,9 @@ bool TWPartition::WipeDataWithoutWipingMedia() {
 
   if (!Mount(true)) return false;
 
-  gui_msg("wiping_data=Wiping data without wiping /data/media ...");
+  gui2_console::info("wiping_data");
   ret = WipeDataWithoutWipingMediaFunc(mount_point_);
-  if (ret) gui_msg("done=Done.");
+  if (ret) gui2_console::info("done");
   return ret;
 }
 
@@ -2268,8 +2261,7 @@ bool TWPartition::WipeDataWithoutWipingMediaFunc(const std::filesystem::path& pa
   std::error_code it_ec;
   fs::directory_iterator it(parent, it_ec);
   if (it_ec) {
-    gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(mount_point_)(
-        it_ec.message()));
+    gui2_console::log_error("error_opening_strerr", mount_point_, it_ec.message());
     return false;
   }
   for (const auto& entry : it) {
@@ -2307,8 +2299,8 @@ bool TWPartition::BackupTar(PartitionSettings* part_settings, pid_t* tar_fork_pi
 
   if (!Mount(true)) return false;
 
-  TWFunc::GuiOperationText(TW_BACKUP_TEXT, backup_display_name_, gui_parse_text("{@backing}"));
-  gui_msg(Msg("backing_up=Backing up {1}...")(backup_display_name_));
+  TWFunc::GuiOperationText(TW_BACKUP_TEXT, backup_display_name_, gui2_console::text("backing"));
+  gui2_console::info("backing_up", backup_display_name_);
 
   DataManager::GetValue(TW_USE_COMPRESSION_VAR, tar.use_compression);
 
@@ -2328,9 +2320,7 @@ bool TWPartition::BackupTar(PartitionSettings* part_settings, pid_t* tar_fork_pi
   const std::string full_filename = fs::path(part_settings->backup_folder) / backup_file_name_;
   if (has_data_media_)
 #ifdef TW_WORKAROUND_BACKUP_BUG
-  gui_msg(Msg(msg::kWarning,
-              "backup_storage_warning=Backups of {1} do not include any files in internal storage such as pictures or downloads.")(
-      display_name_));
+  gui2_console::warning("backup_storage_warning", display_name_);
 #else
     LOGERR(
       "Backups of %s are currently BROKEN in the 16 branch. There is little point in making backups of %s\n\n",
@@ -2340,9 +2330,7 @@ bool TWPartition::BackupTar(PartitionSettings* part_settings, pid_t* tar_fork_pi
   if (mount_point_ == "/data" && DataManager::GetIntValue(TW_IS_FBE)) {
     for (const UsersStruct& user : *PartitionManager.GetUsersList()) {
       if (!user.is_decrypted && user.user_id != 0) {
-        gui_msg(Msg(msg::kWarning,
-                    "backup_storage_undecrypt_warning=Backup will not include some files from user {1} "
-                    "because the user is not decrypted.")(user.user_id));
+        gui2_console::warning("backup_storage_undecrypt_warning", user.user_id);
         const std::string uid = std::to_string(user.user_id);
         backup_exclusions.add_absolute_dir(fs::path("/data/system_ce") / uid);
         backup_exclusions.add_absolute_dir(fs::path("/data/misc_ce") / uid);
@@ -2364,8 +2352,8 @@ bool TWPartition::BackupTar(PartitionSettings* part_settings, pid_t* tar_fork_pi
 }
 
 bool TWPartition::BackupImage(PartitionSettings* part_settings) {
-  TWFunc::GuiOperationText(TW_BACKUP_TEXT, display_name_, gui_parse_text("{@backing}"));
-  gui_msg(Msg("backing_up=Backing up {1}...")(backup_display_name_));
+  TWFunc::GuiOperationText(TW_BACKUP_TEXT, display_name_, gui2_console::text("backing"));
+  gui2_console::info("backing_up", backup_display_name_);
 
   backup_file_name_ = std::format("{}.{}.win", backup_name_, current_file_system_);
 
@@ -2395,18 +2383,14 @@ bool TWPartition::RawReadWrite(const PartitionSettings* part_settings) const {
 
   const android::base::unique_fd src_fd(open(srcfn.c_str(), O_RDONLY | O_LARGEFILE));
   if (!src_fd.ok()) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(srcfn)(
-            strerror(errno)));
+    gui2_console::log_error("error_opening_strerr", srcfn, strerror(errno));
     return false;
   }
 
   const android::base::unique_fd dest_fd(
       open(destfn.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_LARGEFILE, S_IRUSR | S_IWUSR));
   if (!dest_fd.ok()) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(destfn)(
-            strerror(errno)));
+    gui2_console::log_error("error_opening_strerr", destfn, strerror(errno));
     return false;
   }
 
@@ -2488,19 +2472,17 @@ bool TWPartition::RestoreTar(PartitionSettings* part_settings) {
   if (has_android_secure_) {
     if (!WipeAndSec()) return false;
   } else {
-    gui_msg(Msg("wiping=Wiping {1}")(backup_display_name_));
+    gui2_console::info("wiping", backup_display_name_);
     if (has_data_media_ && mount_point_ == "/data" && restore_file_system != current_file_system_) {
-      gui_msg(Msg(msg::kWarning,
-                  "datamedia_fs_restore=WARNING: This /data backup was made with {1} file system! The backup may not boot unless you change back to {1}.")(
-          restore_file_system));
+      gui2_console::warning("datamedia_fs_restore", restore_file_system);
       if (!WipeDataWithoutWipingMedia()) return false;
     } else {
       if (!Wipe(restore_file_system)) return false;
     }
   }
   TWFunc::GuiOperationText(TW_RESTORE_TEXT, backup_display_name_,
-                           gui_parse_text("{@restoring_hdr}"));
-  gui_msg(Msg("restoring=Restoring {1}...")(backup_display_name_));
+                           gui2_console::text("restoring_hdr"));
+  gui2_console::info("restoring", backup_display_name_);
 
   // Remount as read/write as needed so we can restore the backup
   if (!RemountRw(true)) return false;
@@ -2543,8 +2525,8 @@ bool TWPartition::RestoreImage(PartitionSettings* part_settings) {
   const std::string restore_file_system = GetRestoreFileSystem(part_settings);
 
   TWFunc::GuiOperationText(TW_RESTORE_TEXT, backup_display_name_,
-                           gui_parse_text("{@restoring_hdr}"));
-  gui_msg(Msg("restoring=Restoring {1}...")(backup_display_name_));
+                           gui2_console::text("restoring_hdr"));
+  gui2_console::info("restoring", backup_display_name_);
 
   const std::string full_filename = fs::path(part_settings->backup_folder) / backup_file_name_;
 
@@ -2897,7 +2879,7 @@ void TWPartition::RecreateMediaFolder() {
     return;
   }
   if (!Mount(true)) {
-    gui_msg(Msg(msg::kError, "recreate_folder_err=Unable to recreate {1} folder.")(media_path));
+    gui2_console::log_error("recreate_folder_err", media_path);
   } else if (!TWFunc::IsPathExists(media_path)) {
     PartitionManager.MountByPath(symlink_mount_point_, true);
     LOGINFO("Recreating %s folder.\n", media_path.c_str());
@@ -2927,7 +2909,7 @@ void TWPartition::RecreateAndSecFolder() {
   if (!has_android_secure_) return;
   LOGINFO("Creating %s: %s\n", backup_display_name_.c_str(), symlink_path_.c_str());
   if (!Mount(true)) {
-    gui_msg(Msg(msg::kError, "recreate_folder_err=Unable to recreate {1} folder.")(backup_name_));
+    gui2_console::log_error("recreate_folder_err", backup_name_);
   } else if (!TWFunc::IsPathExists(symlink_path_)) {
     LOGINFO("Recreating %s folder.\n", backup_name_.c_str());
     PartitionManager.MountByPath(symlink_mount_point_, true);
@@ -2974,7 +2956,7 @@ bool TWPartition::FlashImage(const PartitionSettings* part_settings) {
   if (const uint64_t image_size = TWFunc::GetFileSize(full_filename); image_size > size_) {
     LOGINFO("Size (%lu bytes) of image '%s' is larger than target device '%s' (%lu bytes)\n",
             image_size, backup_file_name_.c_str(), actual_block_device_.c_str(), size_);
-    gui_err("img_size_err=Size of image is larger than target device");
+    gui2_console::log_error("img_size_err");
     return false;
   }
   if (backup_method_ == BackupMethod::kDd) {
@@ -2992,16 +2974,12 @@ bool TWPartition::IsSparseImage(const std::string& Filename) {
   uint32_t magic = 0;
   const android::base::unique_fd fd(open(Filename.c_str(), O_RDONLY));
   if (!fd.ok()) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(Filename)(
-            strerror(errno)));
+    gui2_console::log_error("error_opening_strerr", Filename, strerror(errno));
     return false;
   }
 
   if (read(fd.get(), &magic, sizeof(magic)) != sizeof(magic)) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(Filename)(
-            strerror(errno)));
+    gui2_console::log_error("error_opening_strerr", Filename, strerror(errno));
     return false;
   }
   return magic == SPARSE_HEADER_MAGIC;
@@ -3012,27 +2990,23 @@ bool TWPartition::FlashSparseImage(const std::string& Filename) const {
   BlkDiscard();
 #endif
 
-  gui_msg(Msg("flashing=Flashing {1}...")(display_name_));
+  gui2_console::info("flashing", display_name_);
 
   const android::base::unique_fd in(open(Filename.c_str(), O_RDONLY));
   if (!in.ok()) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(Filename)(
-            strerror(errno)));
+    gui2_console::log_error("error_opening_strerr", Filename, strerror(errno));
     return false;
   }
 
   struct sparse_file* s = sparse_file_import(in.get(), true, false);
   if (!s) {
-    gui_msg(Msg(msg::kError, "sparse_import_err=Failed to import sparse image '{1}'")(Filename));
+    gui2_console::log_error("sparse_import_err", Filename);
     return false;
   }
 
   const android::base::unique_fd out(open(actual_block_device_.c_str(), O_WRONLY));
   if (!out.ok()) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(actual_block_device_)(
-            strerror(errno)));
+    gui2_console::log_error("error_opening_strerr", actual_block_device_, strerror(errno));
     sparse_file_destroy(s);
     return false;
   }

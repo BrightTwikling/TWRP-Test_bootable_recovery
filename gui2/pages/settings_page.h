@@ -23,7 +23,6 @@ struct settings_page_options {
   const void* haptics_target = nullptr;
   const void* recording_target = nullptr;
   const void* console_settings_target = nullptr;
-  const void* legacy_target = nullptr;
   bool has_screen = false;
   bool has_haptics = false;
   bool has_recording = false;

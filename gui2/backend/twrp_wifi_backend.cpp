@@ -17,8 +17,7 @@ namespace gui2_backend {
 
 namespace {
 
-// The same interface and control socket the legacy WLAN page uses; see the
-// wlan* actions in gui/action.cpp.
+// Recovery WLAN interface and wpa_supplicant control socket.
 constexpr const char* kInterface = "wlan0";
 constexpr const char* kControlDir = "/tmp/recovery/sockets";
 constexpr const char* kService = "wpa_supplicant";

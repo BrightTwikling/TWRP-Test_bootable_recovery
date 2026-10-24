@@ -23,7 +23,6 @@
 
 enum gui2_exit_reason {
   GUI2_EXIT_INITIALIZATION_FAILED = 1,
-  GUI2_EXIT_TO_LEGACY = 2,
   GUI2_EXIT_STARTUP_FAILED = 3,
 };
 

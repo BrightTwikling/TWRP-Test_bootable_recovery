@@ -625,14 +625,11 @@ private:
 
   friend class TWPartitionManager;
   friend class DataManager;
-  // gui2 backends render the same partition details as gui/action.cpp.
+  // GUI2 tools need access to partition details.
   friend class gui2_backend::twrp_tools_backend;
   // The mount page owns explicit Data remounts and reads this state to report
   // whether CE credentials are still required.
   friend class gui2_backend::twrp_mount_backend;
-  friend class GUIPartitionList;
-  friend class GUIAction;
-  friend class PageManager;
 };
 
 struct UsersStruct {

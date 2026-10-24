@@ -46,7 +46,7 @@ struct console_read_result {
   bool busy = false;
 };
 
-// Read-only view of the recovery console shared with the legacy GUI.
+// Recovery console backed by GUI2 i18n and retained typed message records.
 class console_backend {
  public:
   virtual ~console_backend() = default;
@@ -60,11 +60,7 @@ class console_backend {
                                             const console_read_limits& limits,
                                             std::vector<console_line>* lines) = 0;
 
-  // The legacy language files' strings, which console messages are written
-  // in; empty when a key has none.
-  virtual void load_strings(const std::string& language) = 0;
-  virtual std::string translate(const std::string& key) = 0;
-  // What setlanguage does besides: partition names and console lines follow.
+  virtual void set_language(const std::string& language) = 0;
   virtual void retranslate(const std::string& language) = 0;
 };
 

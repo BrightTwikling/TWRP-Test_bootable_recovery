@@ -44,7 +44,7 @@ int wipe_hint_height(const gui2_core::ui_metrics& metrics, const char* text) {
 }
 
 int format_data_keyboard_height(const gui2_core::ui_metrics& metrics) {
-  return gui2_components::keyboard_height(metrics, gui2_components::keyboard_layout::LETTERS);
+  return gui2_components::keyboard_reserved_height(metrics, gui2_components::keyboard_layout::LETTERS);
 }
 
 void build_wipe_page(const wipe_page_options& options) {

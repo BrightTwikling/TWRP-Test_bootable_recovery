@@ -4,8 +4,8 @@
 #include <functional>
 
 #include "data.hpp"
-#include "gui/gui.hpp"
-#include "gui/twmsg.h"
+#include "gui2/console/stdio_adapter.h"
+#include "gui2/console/messages.h"
 #include "partitions.hpp"
 #include "twcommon.h"
 #include "twrp_operation.h"
@@ -62,7 +62,7 @@ int wipe(std::string arg, const std::function<void(const std::string&, int, bool
         report(wipe_path, item_index, false);
         if (wipe_path == "/and-sec") {
           if (!PartitionManager.WipeAndroidSecure()) {
-            gui_msg("and_sec_wipe_err=Unable to wipe android secure");
+            gui2_console::info("and_sec_wipe_err");
             ret_val = false;
             break;
           } else {
@@ -70,7 +70,7 @@ int wipe(std::string arg, const std::function<void(const std::string&, int, bool
           }
         } else if (wipe_path == "DALVIK") {
           if (!PartitionManager.WipeDalvikCache()) {
-            gui_err("dalvik_wipe_err=Failed to wipe dalvik");
+            gui2_console::log_error("dalvik_wipe_err");
             ret_val = false;
             break;
           } else {
@@ -86,7 +86,7 @@ int wipe(std::string arg, const std::function<void(const std::string&, int, bool
         }
         if (!skip) {
           if (!PartitionManager.WipeByPath(wipe_path)) {
-            gui_msg(Msg(msg::kError, "unable_to_wipe=Unable to wipe {1}.")(wipe_path));
+            gui2_console::log_error("unable_to_wipe", wipe_path);
             ret_val = false;
             break;
           } else if (wipe_path == DataManager::GetCurrentStoragePath()) {

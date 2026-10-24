@@ -31,7 +31,7 @@ bool initialize_graphics(const gui2_context* context, graphics_state* state,
   fprintf(stderr, "gui2: %dx%d, short side %d mm, scale %.2f\n", gr_fb_width(), gr_fb_height(),
           short_side_mm, gui2_core::ui.scale);
   if (!state->fonts.initialize(gui2_core::ui.scale)) {
-    shutdown_graphics(state, false);
+    shutdown_graphics(state);
     return false;
   }
   state->text_font = state->fonts.text();
@@ -42,12 +42,12 @@ bool initialize_graphics(const gui2_context* context, graphics_state* state,
     state->console_fonts[i] = state->fonts.console(i);
 
   if (gui2_display_init() == nullptr) {
-    shutdown_graphics(state, false);
+    shutdown_graphics(state);
     return false;
   }
   state->pointer_indev = gui2_input_init();
   if (state->pointer_indev == nullptr) {
-    shutdown_graphics(state, false);
+    shutdown_graphics(state);
     return false;
   }
   lv_timer_set_period(lv_indev_get_read_timer(state->pointer_indev), 5);
@@ -58,7 +58,7 @@ bool initialize_graphics(const gui2_context* context, graphics_state* state,
   return true;
 }
 
-void shutdown_graphics(graphics_state* state, bool keep_display) {
+void shutdown_graphics(graphics_state* state) {
   if (state == nullptr) return;
   if (state->lv_initialized) {
     lv_deinit();
@@ -77,7 +77,7 @@ void shutdown_graphics(graphics_state* state, bool keep_display) {
     ev_exit();
     state->events_initialized = false;
   }
-  if (!keep_display && state->should_exit_display) {
+  if (state->should_exit_display) {
     gr_exit();
     state->should_exit_display = false;
   }

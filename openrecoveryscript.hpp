@@ -36,8 +36,7 @@ class OpenRecoveryScript
 	static int Backup_Command(string Options);                                     // Runs a backup
 public:
 	static int Insert_ORS_Command(string Command);                                 // Inserts the Command into the SCRIPT_FILE_TMP file
-	static void Run_OpenRecoveryScript();                                          // Starts the GUI Page for running OpenRecoveryScript
-	static int Run_OpenRecoveryScript_Action();                                    // Actually runs the ORS scripts for the GUI action
+	static int Run_OpenRecoveryScript_Action();                                    // Runs startup and queued ORS scripts
 	static void Call_After_CLI_Command(VoidFunction fn) { call_after_cli_command = fn; }
 	static void Run_CLI_Command(const char* command);                              // Runs a command for orscmd (twrp binary)
 	static int remountrw();                                                        // Remount system and vendor rw

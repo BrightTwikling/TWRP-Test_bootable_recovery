@@ -10,15 +10,12 @@
 
 #include "data.hpp"
 #include "fuse_sideload.h"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "partitions.hpp"
 #include "twcommon.h"
 #include "twinstall/adb_install.h"
 #include "twrp_functions.hpp"
 #include "twrp_operation.h"
-
-// The child's pid, shared with the legacy action code.
-extern pid_t sideload_child_pid;
 
 namespace gui2_backend {
 
@@ -45,7 +42,6 @@ bool twrp_sideload_backend::start(bool wipe_dalvik, bool wipe_cache) {
   // The sideload page's two checkboxes.
   DataManager::SetValue("tw_wipe_dalvik", wipe_dalvik ? 1 : 0);
   DataManager::SetValue("tw_wipe_cache", wipe_cache ? 1 : 0);
-  DataManager::SetValue("tw_has_cancel", 1);
   running_.store(true);
   worker_ = std::thread(&twrp_sideload_backend::run, this);
   return true;
@@ -54,17 +50,15 @@ bool twrp_sideload_backend::start(bool wipe_dalvik, bool wipe_cache) {
 // GUIAction::adbsideload
 void twrp_sideload_backend::run() {
   operation_start("Sideload");
-  gui_msg("start_sideload=Starting ADB sideload feature...");
+  gui2_console::info("start_sideload");
   bool mtp_was_enabled = TWFunc::ToggleMtp(false);
 
   // wait for the adb connection
   Device::BuiltinAction reboot_action = Device::REBOOT_BOOTLOADER;
   int ret = twrp_sideload("/", &reboot_action);
-  sideload_child_pid = GetMiniAdbdPid();
-  DataManager::SetValue("tw_has_cancel", 0);  // Remove cancel button from gui now that the zip install is going to start
 
   if (ret != 0) {
-    if (ret == -2) gui_msg("need_new_adb=You need adb 1.0.32 or newer to sideload to this device.");
+    if (ret == -2) gui2_console::info("need_new_adb");
     ret = 1;  // failure
   } else {
     int wipe_cache = 0;
@@ -89,13 +83,12 @@ void twrp_sideload_backend::run() {
 // GUIAction::adbsideloadcancel
 void twrp_sideload_backend::stop_child() {
   struct stat st;
-  DataManager::SetValue("tw_has_cancel", 0);  // Remove cancel button from gui
-  gui_msg("cancel_sideload=Cancelling ADB sideload...");
+  gui2_console::info("cancel_sideload");
   LOGINFO("Signaling child sideload process to exit.\n");
   // Calling stat() on this magic filename signals the minadbd
   // subprocess to shut down.
   stat(FUSE_SIDELOAD_HOST_EXIT_PATHNAME, &st);
-  sideload_child_pid = GetMiniAdbdPid();
+  const pid_t sideload_child_pid = GetMiniAdbdPid();
   if (!sideload_child_pid) {
     LOGERR("Unable to get child ID\n");
     return;
@@ -106,7 +99,6 @@ void twrp_sideload_backend::stop_child() {
   int status;
   LOGINFO("Waiting for child sideload process to exit.\n");
   waitpid(sideload_child_pid, &status, 0);
-  sideload_child_pid = 0;
   DataManager::SetValue("tw_page_done", "1");  // For OpenRecoveryScript support
 }
 

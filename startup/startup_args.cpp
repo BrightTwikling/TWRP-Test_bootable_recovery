@@ -25,7 +25,7 @@
 
 #include "data.hpp"
 #include "get_args.hpp"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "openrecoveryscript.hpp"
 #include "twcommon.h"
 #include "variables.h"
@@ -51,13 +51,12 @@ bool StartupArgs::ProcessRecoveryArgs(const std::vector<std::string>& args, cons
 
   if (arg.starts_with(kRescueParty)) {
     gui_print("\n\n");
-    gui_msg(Msg(msg::kError,
-                "rescue_party0=Android Rescue Party trigger! Possible solutions? Either:"));
-    gui_msg(Msg(msg::kError, "rescue_party1= 1. Wipe caches, and/or"));
-    gui_msg(Msg(msg::kError, "rescue_party2= 2. Format data, and/or"));
-    gui_msg(Msg(msg::kError, "rescue_party3= 3. Clean-flash your ROM."));
+    gui2_console::log_error("rescue_party0");
+    gui2_console::log_error("rescue_party1");
+    gui2_console::log_error("rescue_party2");
+    gui2_console::log_error("rescue_party3");
     gui_print("\n");
-    gui_msg(Msg(msg::kError, "rescue_party4=The reported problem is:"));
+    gui2_console::log_error("rescue_party4");
     gui_print_color("error", " '%s'\n\n",
                     index + 1 < args.size() ? args[index + 1].c_str() : "");
   } else {
@@ -92,7 +91,7 @@ bool StartupArgs::ProcessRecoveryArgs(const std::vector<std::string>& args, cons
   } else if (arg.starts_with(kWipeCache)) {
     if (!OpenRecoveryScript::Insert_ORS_Command("wipe cache\n")) return false;
   } else if (arg.starts_with(kNandroid)) {
-    DataManager::SetValue(TW_BACKUP_NAME, gui_parse_text("{@auto_generate}"));
+    DataManager::SetValue(TW_BACKUP_NAME, gui2_console::text("auto_generate"));
     if (!OpenRecoveryScript::Insert_ORS_Command("backup BSDCAE\n")) return false;
   }
   return true;

@@ -21,8 +21,8 @@ namespace {
 constexpr const char* kUiFontPath = GUI2_UI_FONT_PATH;
 #ifdef GUI2_HOST_PREVIEW
 const std::string kTerminalFontPath =
-    std::string(kUiFontPath).substr(0, std::string(kUiFontPath).find("extra-languages/fonts/")) +
-    "common/fonts/DroidSansMono.ttf";
+    std::string(kUiFontPath).substr(0, std::string(kUiFontPath).find_last_of('/') + 1) +
+    "DroidSansMono.ttf";
 #else
 constexpr const char* kTerminalFontPath = "/twres/fonts/DroidSansMono.ttf";
 #endif

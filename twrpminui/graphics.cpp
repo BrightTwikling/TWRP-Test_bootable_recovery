@@ -33,7 +33,7 @@
 
 #include <cutils/properties.h>
 #include <pixelflinger/pixelflinger.h>
-#include "gui/placement.h"
+#include "twrpminui/placement.h"
 #include "twrpminui/minui.h"
 #include "graphics.h"
 // For std::min and std::max

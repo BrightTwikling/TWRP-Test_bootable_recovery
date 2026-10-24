@@ -21,11 +21,10 @@
 
 #include "progresstracking.hpp"
 #include "twcommon.h"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "data.hpp"
 #include "twrp_functions.hpp"
 #include <time.h>
-#include <format>
 #include "unit_conversion.hpp"
 
 const int32_t update_interval_ms = 200; // Update interval in ms
@@ -89,9 +88,7 @@ void ProgressTracking::UpdateDisplayDetails(const bool force) {
 	const std::string current = UnitConversion::FormatBytes(current_size + previous_partitions_size);
 	const std::string total = UnitConversion::FormatBytes(total_backup_size);
 	const int size_percent = static_cast<int>(display_percent);
-	std::string size_progress = std::vformat(
-	    gui_lookup("size_progress", "{} / {}, {}%"),
-	    std::make_format_args(current, total, size_percent));
+	std::string size_progress = gui2_console::format("size_progress", current, total, size_percent);
 	DataManager::SetValue("tw_size_progress", size_progress);
 	progress_percent = (display_percent / 100);
 	DataManager::SetProgress((float)(progress_percent));
@@ -99,11 +96,8 @@ void ProgressTracking::UpdateDisplayDetails(const bool force) {
 	if (!display_file_count || file_count == 0) {
 		DataManager::SetValue("tw_file_progress", "");
 	} else {
-		string file_prog = gui_lookup("file_progress", "%llu of %llu files, %i%%");
-		char file_progress[1024];
-
 		display_percent = (double)(current_count) / (double)(file_count) * 100;
-		sprintf(file_progress, file_prog.c_str(), current_count, file_count, (int)(display_percent));
-		DataManager::SetValue("tw_file_progress", file_progress);
+		DataManager::SetValue("tw_file_progress",
+		    gui2_console::format("file_progress", current_count, file_count, static_cast<int>(display_percent)));
 	}
 }

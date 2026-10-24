@@ -27,7 +27,7 @@
 #include "twrpRepacker.hpp"
 #include "twcommon.h"
 #include "variables.h"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 
 #ifdef AB_OTA_UPDATER
 #include <BootControlClient.h>
@@ -106,7 +106,7 @@ std::string twrpRepacker::Unpack_Image(const std::string& Source_Path, const std
 	if ((ret = TWFunc::ExecCmd(command, magisk_unpack_output, true)) != 0 &&
 		(!WIFEXITED(ret) || WEXITSTATUS(ret) != 3)) {
 		LOGINFO("Error unpacking %s, ret: %d!\n", Source_Path.c_str(), ret);
-		gui_msg(Msg(msg::kError, "unpack_error=Error unpacking image."));
+		gui2_console::log_error("unpack_error");
 		return std::string();
 	}
 	std::string ramdisk_format;
@@ -177,9 +177,9 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
 	PartitionManager.UpdateSystemDetails();
 	TWPartition* part = PartitionManager.FindPartitionByPath(dest_partition);
 	if (part)
-		gui_msg(Msg("unpacking_image=Unpacking {1}...")(part->GetDisplayName()));
+		gui2_console::info("unpacking_image", part->GetDisplayName());
 	else {
-		gui_msg(Msg(msg::kError, "unable_to_locate=Unable to locate {1}.")(dest_partition.c_str()));
+		gui2_console::log_error("unable_to_locate", dest_partition.c_str());
 		return false;
 	}
 	if (!Backup_Image_For_Repack(part, REPACK_ORIG_DIR, Repack_Options.Backup_First, gui_lookup("repack", "Repack")))
@@ -192,13 +192,13 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
 			return false;
 		image_ramdisk_format = "gzip";
 	} else {
-		gui_msg(Msg("unpacking_image=Unpacking {1}...")(Target_Image));
+		gui2_console::info("unpacking_image", Target_Image);
 		image_ramdisk_format = Unpack_Image(Target_Image, REPACK_NEW_DIR, true);
 	}
 	if (image_ramdisk_format.empty())
 		return false;
 	DataManager::SetProgress(.5);
-	gui_msg(Msg("repacking_image=Repacking {1}...")(part->GetDisplayName()));
+	gui2_console::info("repacking_image", part->GetDisplayName());
 	std::string path = REPACK_NEW_DIR;
 	if (Repack_Options.Type == REPLACE_KERNEL) {
 		// When we replace the kernel, what we really do is copy the boot partition ramdisk into the new image's folder
@@ -246,14 +246,14 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
 	if (recompress) {
 		std::string decompress_cmd = "/system/bin/magiskboot decompress " + orig_compressed_image + " " + copy_compressed_image;
 		if (TWFunc::ExecCmd(decompress_cmd) != 0) {
-			gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
+			gui2_console::log_error("repack_error");
 			return false;
 		}
 		std::rename(copy_compressed_image.c_str(), orig_compressed_image.c_str());
 	}
 
 	if (TWFunc::ExecCmd(command) != 0) {
-		gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
+		gui2_console::log_error("repack_error");
 		return false;
 	}
 
@@ -296,14 +296,14 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
 			if (recompress) {
 				std::string decompress_cmd = "/system/bin/magiskboot decompress " + orig_compressed_image + " " + copy_compressed_image;
 				if (TWFunc::ExecCmd(decompress_cmd) != 0) {
-					gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
+					gui2_console::log_error("repack_error");
 					return false;
 				}
 				std::rename(copy_compressed_image.c_str(), orig_compressed_image.c_str());
 			}
 
 			if (TWFunc::ExecCmd(command) != 0) {
-				gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
+				gui2_console::log_error("repack_error");
 				return false;
 			}
 			DataManager::SetProgress(.75);
@@ -319,7 +319,7 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
 	}
 	TWFunc::RemoveDir(REPACK_NEW_DIR, false);
 	if (dest_partition == "/boot")
-		gui_msg(Msg(msg::kWarning, "repack_overwrite_warning=If device was previously rooted, then root has been overwritten and will need to be reinstalled."));
+		gui2_console::warning("repack_overwrite_warning");
 	return true;
 }
 
@@ -360,7 +360,7 @@ bool twrpRepacker::Flash_Current_Twrp() {
 	}
 #else
 	if (PartitionManager.FindPartitionByPath("/recovery")) {
-		gui_err("flash_current_twrp_not_supported=Flash Current TWRP is not supported on non-A/B devices with dedicated recovery");
+		gui2_console::log_error("flash_current_twrp_not_supported");
 		return false;
 	}
 #endif // AB_OTA_UPDATER
@@ -380,12 +380,12 @@ bool twrpRepacker::Flash_Current_Twrp() {
 	Repack_Options.Backup_First = DataManager::GetIntValue("tw_repack_backup_first") != 0;
 	std::string verifyfiles = "cd / && sha256sum --status -c ramdisk-files.sha256sum";
 	if (TWFunc::ExecCmd(verifyfiles) != 0) {
-		gui_msg(Msg(msg::kError, "modified_ramdisk_error=ramdisk files have been modified, unable to create ramdisk to flash, fastboot boot twrp and try this option again or use the Install Recovery Ramdisk option."));
+		gui2_console::log_error("modified_ramdisk_error");
 		return false;
 	}
 	std::string command = "cd / && /system/bin/cpio -H newc -o < ramdisk-files.txt > /tmp/currentramdisk.cpio && /system/bin/gzip -f /tmp/currentramdisk.cpio";
 	if (TWFunc::ExecCmd(command) != 0) {
-		gui_msg(Msg(msg::kError, "create_ramdisk_error=failed to create ramdisk to flash."));
+		gui2_console::log_error("create_ramdisk_error");
 		return false;
 	}
 	if (!Repack_Image_And_Flash("/tmp/currentramdisk.cpio.gz", Repack_Options))

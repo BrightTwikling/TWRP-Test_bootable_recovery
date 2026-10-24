@@ -49,8 +49,7 @@
 #include "partitions.hpp"
 #include "twrp_digest_driver.hpp"
 #include "twrp_functions.hpp"
-#include "gui/gui.hpp"
-#include "gui/pages.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "twinstall.h"
 #include "installcommand.h"
 #include "../twrpRepacker.hpp"
@@ -60,33 +59,8 @@
 enum zip_type {
 	UNKNOWN_ZIP_TYPE = 0,
 	UPDATE_BINARY_ZIP_TYPE,
-	AB_OTA_ZIP_TYPE,
-	TWRP_THEME_ZIP_TYPE
+	AB_OTA_ZIP_TYPE
 };
-
-static int Install_Theme(const char* path, ZipArchiveHandle Zip) {
-	std::string binary_name("ui.xml");
-	ZipEntry64 binary_entry;
-	if (FindEntry(Zip, binary_name, &binary_entry) != 0) {
-		return INSTALL_CORRUPT;
-	}
-	if (!PartitionManager.MountSettingsStorage(true))
-		return INSTALL_ERROR;
-	string theme_path = DataManager::GetSettingsStoragePath();
-	theme_path += "/TWRP/theme";
-	if (!TWFunc::IsPathExists(theme_path)) {
-		if (!TWFunc::RecursiveMkdir(theme_path)) {
-			return INSTALL_ERROR;
-		}
-	}
-	theme_path += "/ui.zip";
-	if (TWFunc::CopyFile(path, theme_path, 0644) != 0) {
-		return INSTALL_ERROR;
-	}
-	LOGINFO("Installing custom theme '%s' to '%s'\n", path, theme_path.c_str());
-	PageManager::RequestReload();
-	return INSTALL_SUCCESS;
-}
 
 static int Prepare_Update_Binary(ZipArchiveHandle Zip) {
 	char arches[PATH_MAX];
@@ -247,13 +221,13 @@ bool isUpdatePkg(ZipArchiveHandle Zip) {
 int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 	int ret_val, zip_verify = 1, unmount_system = 1, reflashtwrp = 0;
 
-	gui_msg(Msg("installing_zip=Installing zip file '{1}'")(path));
+	gui2_console::info("installing_zip", path);
 	if (strlen(path) < 9 || strncmp(path, "/sideload", 9) != 0) {
 		string digest_str;
 		string Full_Filename = path;
 
 		if (check_for_digest) {
-			gui_msg("check_for_digest=Checking for Digest file...");
+			gui2_console::info("check_for_digest");
 			if (*path != '@' && !TwrpDigestDriver::CheckFileDigest(Full_Filename)) {
 				LOGERR("Aborting zip install: Digest verification failed\n");
 				return INSTALL_CORRUPT;
@@ -272,7 +246,7 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 	}
 
 	if (zip_verify) {
-		gui_msg("verify_zip_sig=Verifying zip signature...");
+		gui2_console::info("verify_zip_sig");
 		static constexpr const char* CERTIFICATE_ZIP_FILE = "/system/etc/security/otacerts.zip";
 		std::vector<Certificate> loaded_keys = LoadKeysFromZipfile(CERTIFICATE_ZIP_FILE);
 		if (loaded_keys.empty()) {
@@ -284,10 +258,10 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		ret_val = verify_file(package.get(), loaded_keys, std::bind(&DataManager::SetProgress, std::placeholders::_1, false));
 		if (ret_val != VERIFY_SUCCESS) {
 			LOGINFO("Zip signature verification failed: %i\n", ret_val);
-			gui_err("verify_zip_fail=Zip signature verification failed!");
+			gui2_console::log_error("verify_zip_fail");
 			return -1;
 		} else {
-			gui_msg("verify_zip_done=Zip signature verified successfully.");
+			gui2_console::info("verify_zip_done");
 		}
 	}
 
@@ -299,9 +273,9 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 	bool _isUpdatePkg = isUpdatePkg(Zip);
 
 	if (unmount_system) {
-		gui_msg("unmount_system=Unmounting System...");
+		gui2_console::info("unmount_system");
 		if(!PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), true)) {
-			gui_err("unmount_system_err=Failed unmounting System");
+			gui2_console::log_error("unmount_system_err");
 			return -1;
 		}
 		unlink("/system");
@@ -317,7 +291,7 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		LOGINFO("Update binary zip\n");
 		// Additionally verify the compatibility of the package.
 		if (!verify_package_compatibility(Zip)) {
-			gui_err("zip_compatible_err=Zip Treble compatibility error!");
+			gui2_console::log_error("zip_compatible_err");
 			ret_val = INSTALL_CORRUPT;
 		} else {
 			ret_val = Prepare_Update_Binary(Zip);
@@ -330,7 +304,7 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		if (FindEntry(Zip, ab_binary_name, &ab_binary_entry) == 0) {
 #ifdef AB_OTA_UPDATER
 			LOGINFO("AB zip\n");
-			gui_msg(Msg(msg::kHighlight, "flash_ab_inactive=Flashing A/B zip to inactive slot: {1}")(PartitionManager.GetActiveSlotDisplay()=="A"?"B":"A"));
+			gui2_console::highlight("flash_ab_inactive", PartitionManager.GetActiveSlotDisplay()=="A"?"B":"A");
 			// We need this so backuptool can do its magic
 			bool system_mount_state = PartitionManager.IsMountedByPath(PartitionManager.GetAndroidRootPath());
 			bool vendor_mount_state = PartitionManager.IsMountedByPath("/vendor");
@@ -349,9 +323,9 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 				if (android::base::GetBoolProperty("ro.virtual_ab.enabled", false)) {
 					PartitionManager.UnlockBlockPartitions();
 					PartitionManager.PrepareAllSuperVolumes();
-					gui_warn("mount_vab_partitions=Devices on super may not mount until rebooting recovery.");
+					gui2_console::warning("mount_vab_partitions");
 				}
-				gui_warn("flash_ab_reboot=To flash additional zips, please reboot recovery to switch to the updated slot.");
+				gui2_console::warning("flash_ab_reboot");
 				DataManager::GetValue(TW_AUTO_REFLASHTWRP_VAR, reflashtwrp);
 				if (reflashtwrp) {
 					twrpRepacker repacker;
@@ -359,29 +333,22 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 				}
 			}
 #else
-			gui_err("no_ab_support=A/B OTA zip is not supported on non-A/B devices");
+			gui2_console::log_error("no_ab_support");
 			ret_val = INSTALL_CORRUPT;
 #endif
 		} else {
-			std::string binary_name("ui.xml");
-			ZipEntry64 binary_entry;
-			if (FindEntry(Zip, binary_name, &binary_entry) == 0) {
-				LOGINFO("TWRP theme zip\n");
-				ret_val = Install_Theme(path, Zip);
-			} else {
-				ret_val = INSTALL_CORRUPT;
-			}
+			ret_val = INSTALL_CORRUPT;
 		}
 	}
 	time(&stop);
 	int total_time = (int) difftime(stop, start);
 	if (ret_val == INSTALL_CORRUPT) {
-		gui_err("invalid_zip_format=Invalid zip file format!");
+		gui2_console::log_error("invalid_zip_format");
 	} else {
 		LOGINFO("Install took %i second(s).\n", total_time);
 	}
 
-	if (ret_val == INSTALL_SUCCESS) gui_msg(Msg(msg::kHighlight, "install_took_seconds_msg=Install took {1} second(s).")(total_time));
+	if (ret_val == INSTALL_SUCCESS) gui2_console::highlight("install_took_seconds_msg", total_time);
 
 	if (_isUpdatePkg && ret_val == INSTALL_SUCCESS) {
 		if (DataManager::GetIntValue(TW_AUTO_DISABLE_AVB2_VAR)) PartitionManager.DisableAvb2(true);

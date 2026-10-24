@@ -50,9 +50,6 @@ void build_settings_page(const settings_page_options& options) {
       options.content, metrics, strings.console_settings_title, strings.console_settings_summary,
       options.option_event_callback, options.console_settings_target,
       options.press_guard_callback);
-  gui2_components::create_setting_card(options.content, metrics, strings.classic_gui_title,
-                                       strings.classic_gui_detail, options.option_event_callback,
-                                       options.legacy_target, options.press_guard_callback);
 }
 
 }  // namespace gui2_pages

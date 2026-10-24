@@ -475,6 +475,9 @@ cc_binary {
         "oaes/oaes.cpp",
         "startup/startup_args.cpp",
         "startup/get_args.cpp",
+        "gui2/console/stdio_adapter.cpp",
+        "gui2/backend/xml/xml.cpp",
+        "gui2/backend/terminal_engine.cpp",
         "gui2/backend/twrp_console_backend.cpp",
         "gui2/backend/twrp_hardware_settings.cpp",
         "gui2/backend/backlight_controller.cpp",
@@ -508,7 +511,6 @@ cc_binary {
         "system/core/libsparse",
     ],
     local_include_dirs: [
-        "gui/include",
         "digest",
     ],
 
@@ -535,7 +537,6 @@ cc_binary {
         "libtwrpinstall",
         "libzstd",
         "update_metadata-protos",
-        "libtwrpgui",
         "libtar_static",
         "libmounts",
         "libotautil",
@@ -597,7 +598,6 @@ cc_binary {
         "liblvgl_twrp",
         "libgui2",
         "libtwrpperf",
-        "libtwmsg_twrp",
     ] + select(soong_config_variable("twrpGlobalVars", "include_libresetprop"), {
         true: [
             "libresetprop",

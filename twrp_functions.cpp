@@ -66,12 +66,12 @@
 #include "abx.hpp"
 #include "bootloader_message/bootloader_message.h"
 #include "data.hpp"
-#include "gui/pages.hpp"
-#include "gui/rapidxml.hpp"
+#include "gui2/backend/xml/xml.h"
+#include "gui2/third_party/rapidxml.hpp"
 #include "partitions.hpp"
 #include "set_metadata.h"
 #include "twcommon.h"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "oaes/oaes.hpp"
 #include "twinstall/install.h"
 #include "variables.h"
@@ -142,17 +142,13 @@ std::string TWFunc::GetPath(const std::string& path) {
 int TWFunc::WaitForChild(const pid_t pid, int* status, const std::string& child_name, const bool show_errors) {
   if (const pid_t rc_pid = waitpid(pid, status, 0); rc_pid > 0) {
     if (WIFSIGNALED(*status)) {
-      if (show_errors) gui_msg(
-          Msg(msg::kError, "pid_signal={1} process ended with signal: {2}")(child_name)(
-              WTERMSIG(*status))); // Seg fault or some other non-graceful termination
+      if (show_errors) gui2_console::log_error("pid_signal", child_name, WTERMSIG(*status)); // Seg fault or some other non-graceful termination
       return -1;
     }
     if (WEXITSTATUS(*status) == 0) {
       LOGINFO("%s process ended with RC=%d\n", child_name.c_str(), WEXITSTATUS(*status)); // Success
     } else {
-      if (show_errors) gui_msg(
-          Msg(msg::kError, "pid_error={1} process ended with ERROR: {2}")(child_name)(
-              WEXITSTATUS(*status))); // Graceful exit, but there was an error
+      if (show_errors) gui2_console::log_error("pid_error", child_name, WEXITSTATUS(*status)); // Graceful exit, but there was an error
       return -1;
     }
   } else {
@@ -189,9 +185,7 @@ int TWFunc::WaitForChildTimeout(const pid_t pid, int* status, const std::string&
   }
   if (ret_pid > 0) {
     if (WIFSIGNALED(*status)) {
-      gui_msg(
-          Msg(msg::kError, "pid_signal={1} process ended with signal: {2}")(child_name)(
-              WTERMSIG(*status))); // Seg fault or some other non-graceful termination
+      gui2_console::log_error("pid_signal", child_name, WTERMSIG(*status)); // Seg fault or some other non-graceful termination
       return -1;
     }
   } else if (ret_pid < 0) {
@@ -403,8 +397,7 @@ bool TWFunc::RecursiveMkdir(const std::string& path) {
     if (fs::exists(cur, ec)) continue;
     fs::create_directory(cur, ec);
     if (ec) {
-      gui_msg(Msg(msg::kError, "create_folder_strerr=Can not create '{1}' folder ({2}).")(
-          cur.string())(ec.message()));
+      gui2_console::log_error("create_folder_strerr", cur.string(), ec.message());
       return false;
     }
     tw_set_default_metadata(cur.c_str());
@@ -620,10 +613,10 @@ int TWFunc::TwReboot(const RebootCommand command) {
 void TWFunc::CheckAndRunScript(const char* script_file, const char* display_name) {
   // Check for and run startup script if script exists
   if (struct stat st{}; stat(script_file, &st) == 0) {
-    gui_msg(Msg("run_script=Running {1} script...")(display_name));
+    gui2_console::info("run_script", display_name);
     chmod(script_file, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
     ExecCmd(script_file);
-    gui_msg("done=Done.");
+    gui2_console::info("done");
   }
 }
 
@@ -633,8 +626,7 @@ int TWFunc::RemoveDir(const std::string& path, const bool skip_parent) {
   std::error_code ec;
   const fs::directory_iterator entries(path, ec);
   if (ec) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(path)(ec.message()));
+    gui2_console::log_error("error_opening_strerr", path, ec.message());
     return -1;
   }
 
@@ -763,9 +755,7 @@ bool TWFunc::TryDecryptingBackup(std::string restore_path, const std::string& pa
   std::error_code ec;
   const fs::directory_iterator entries(restore_path, ec);
   if (ec) {
-    gui_msg(
-        Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(restore_path)(
-            ec.message()));
+    gui2_console::log_error("error_opening_strerr", restore_path, ec.message());
     return false;
   }
 
@@ -1052,8 +1042,7 @@ void TWFunc::DisableStockRecoveryReplace() {
     // Disable flashing of stock recovery
     if (IsPathExists("/system/recovery-from-boot.p")) {
       rename("/system/recovery-from-boot.p", "/system/recovery-from-boot.bak");
-      gui_msg(
-          "rename_stock=Renamed stock recovery file in /system to prevent the stock ROM from replacing TWRP.");
+      gui2_console::info("rename_stock");
       sync();
     }
     PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), false);
@@ -1092,7 +1081,7 @@ void TWFunc::CopyKernelLog(const std::string& curr_storage) {
     }
   }
   WriteToFile(dmesg_dst, result);
-  gui_msg(Msg("copy_kernel_log=Copied kernel log to {1}")(dmesg_dst));
+  gui2_console::info("copy_kernel_log", dmesg_dst);
   tw_set_default_metadata(dmesg_dst.c_str());
 }
 
@@ -1103,7 +1092,7 @@ void TWFunc::CopyLogcat(const std::string& curr_storage) {
   std::string result;
   ExecCmd(logcat_cmd, result, false);
   WriteToFile(logcat_dst, result);
-  gui_msg(Msg("copy_logcat=Copied logcat to {1}")(logcat_dst));
+  gui2_console::info("copy_logcat", logcat_dst);
   tw_set_default_metadata(logcat_dst.c_str());
 }
 
@@ -1166,10 +1155,10 @@ void TWFunc::CheckSelinuxSupport() {
     }
   }
   if (ret < 0) {
-    gui_warn("no_kernel_selinux=Kernel does not have support for reading SELinux contexts.");
+    gui2_console::warning("no_kernel_selinux");
   } else {
     freecon(contexts);  // a no-op for nullptr, the probe-not-run case
-    gui_msg("full_selinux=Full SELinux support is present.");
+    gui2_console::info("full_selinux");
   }
 }
 
@@ -1244,8 +1233,8 @@ std::string TWFunc::CheckForTwrpFolder() {
     LOGINFO("One custom recovery folder found.\n");
   }
 
-  // custom_path is a "/name" fragment returned to callers; gui/gui.cpp concatenates it as a
-  // string and depends on the leading slash, so the return contract keeps it. Internally we
+  // custom_path is a "/name" fragment returned to callers. Preserve the leading
+  // slash for compatibility with existing recovery settings. Internally we
   // join the bare chosen name via operator/ (no leading slash → no absolute-replace trap).
   const std::string& chosen = customTwrpFolders.front();
   const std::string custom_path = '/' + chosen;
@@ -1404,7 +1393,7 @@ bool TWFunc::GetServiceFromManifest(const std::string& basepath, const std::stri
   if (!IsPathExists(filename)) return ret;
 
   const std::unique_ptr<char, decltype(&free)> manifest(
-      PageManager::LoadFileToBuffer(filename, nullptr), free);
+      recovery_load_xml(filename), free);
   if (!manifest) return ret;
   LOGINFO("Looking for '%s' service in manifest\n", service.c_str());
 

@@ -173,7 +173,7 @@ restore_page_view build_restore_page(const restore_page_options& options) {
     if (view.keyboard != nullptr && options.overlay_layer != nullptr) {
       lv_obj_set_align(view.keyboard, LV_ALIGN_TOP_LEFT);
       lv_obj_set_pos(view.keyboard, 0,
-                     metrics.height - gui2_components::keyboard_height(
+                     metrics.height - gui2_components::keyboard_reserved_height(
                                           metrics, gui2_components::keyboard_layout::LETTERS));
       options.keyboard->bind(view.password_input);
     }

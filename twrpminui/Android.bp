@@ -31,7 +31,6 @@ cc_library_shared {
         "bootable/recovery",
         "bootable/recovery/twrpinstall/include",
         "bootable/recovery/libpixelflinger/include",
-        "bootable/recovery/gui/include"
     ],
     srcs: [
         "graphics.cpp",

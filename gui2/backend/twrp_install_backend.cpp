@@ -10,8 +10,8 @@
 #include <cutils/properties.h>
 
 #include "data.hpp"
-#include "gui/gui.hpp"
-#include "gui/twmsg.h"
+#include "gui2/console/stdio_adapter.h"
+#include "gui2/console/messages.h"
 #include "partitions.hpp"
 #include "twcommon.h"
 #include "twinstall.h"
@@ -28,9 +28,9 @@ int ozip_decrypt(std::string zip_path) {
   if (!TWFunc::IsPathExists("/system/bin/ozip_decrypt")) {
     return 1;
   }
-  gui_msg("ozip_decrypt_decryption=Starting Ozip Decryption...");
+  gui2_console::info("ozip_decrypt_decryption");
   TWFunc::ExecCmd("ozip_decrypt " + (std::string)TW_OZIP_DECRYPT_KEY + " '" + zip_path + "'");
-  gui_msg("ozip_decrypt_finish=Ozip Decryption Finished!");
+  gui2_console::info("ozip_decrypt_finish");
   return 0;
 }
 #endif
@@ -53,7 +53,7 @@ int flash_zip(std::string filename, int* wipe_cache) {
       return -1;
     }
     if (!TWFunc::IsPathExists(filename)) {
-      gui_msg(Msg(msg::kError, "unable_to_locate=Unable to locate {1}.")(filename));
+      gui2_console::log_error("unable_to_locate", filename);
       return -1;
     }
   }
@@ -69,11 +69,9 @@ int flash_zip(std::string filename, int* wipe_cache) {
   // Now, check if we need to ensure TWRP remains installed...
   struct stat st;
   if (stat("/system/bin/installTwrp", &st) == 0) {
-    DataManager::SetValue("tw_operation", "Configuring TWRP");
-    DataManager::SetValue("tw_partition", "");
-    gui_msg("config_twrp=Configuring TWRP...");
+    gui2_console::info("config_twrp");
     if (TWFunc::ExecCmd("/system/bin/installTwrp reinstall") < 0) {
-      gui_msg("config_twrp_err=Unable to configure TWRP with this kernel.");
+      gui2_console::info("config_twrp_err");
     }
   }
 
@@ -150,7 +148,7 @@ void twrp_install_backend::run_zip(std::vector<std::string> zip_queue) {
     ret_val = flash_zip(zip_path, &wipe_cache);
     TWFunc::SetPerformanceMode(false);
     if (ret_val != 0) {
-      gui_msg(Msg(msg::kError, "zip_err=Error installing zip file '{1}'")(zip_path));
+      gui2_console::log_error("zip_err", zip_path);
       ret_val = 1;
       break;
     }
@@ -161,7 +159,7 @@ void twrp_install_backend::run_zip(std::vector<std::string> zip_queue) {
   }
 
   if (wipe_cache) {
-    gui_msg("zip_wipe_cache=One or more zip requested a cache wipe -- Wiping cache now.");
+    gui2_console::info("zip_wipe_cache");
     PartitionManager.WipeByPath("/cache");
   }
 
@@ -223,7 +221,7 @@ std::string twrp_install_backend::image_target_for(const std::string& filename) 
 }
 
 bool twrp_install_backend::start_image(const std::string& path, const std::string& mount_point,
-                                       bool both_slots) {
+                                      bool both_slots) {
   if (running_.load() || path.empty()) return false;
   join_finished_thread();
   {
@@ -233,35 +231,30 @@ bool twrp_install_backend::start_image(const std::string& path, const std::strin
     status_.items = {path};
     started_ = std::chrono::steady_clock::now();
   }
-  // What the legacy file selector and flash image page leave behind.
-  const size_t slash = path.find_last_of('/');
-  DataManager::SetValue("tw_zip_location", slash == std::string::npos ? "/" : path.substr(0, slash));
-  DataManager::SetValue("tw_file", slash == std::string::npos ? path : path.substr(slash + 1));
+  // FlashImage still consumes the selected partition through DataManager.
   DataManager::SetValue("tw_flash_partition", mount_point + ";");
   DataManager::SetValue("tw_flash_both_slots", both_slots ? 1 : 0);
   running_.store(true);
-  worker_ = std::thread(&twrp_install_backend::run_image, this);
+  worker_ = std::thread(&twrp_install_backend::run_image, this, path, mount_point, both_slots);
   return true;
 }
 
-// GUIAction::flashimage
-void twrp_install_backend::run_image() {
+// Image parameters are captured by value when the worker starts.
+void twrp_install_backend::run_image(std::string image_path, std::string mount_point,
+                                     bool both_slots) {
   int op_status = 0;
   bool flag = true;
 
   operation_start("Flash Image");
-  std::string path, filename;
-  DataManager::GetValue("tw_zip_location", path);
-  DataManager::GetValue("tw_file", filename);
+  const size_t slash = image_path.find_last_of('/');
+  const std::string path = slash == std::string::npos ? "/" : image_path.substr(0, slash);
+  const std::string filename =
+      slash == std::string::npos ? image_path : image_path.substr(slash + 1);
 
 #ifdef AB_OTA_UPDATER
-  std::string target = DataManager::GetStrValue("tw_flash_partition");
-  unsigned int pos = target.find_last_of(';');
-  std::string mount_point = pos != std::string::npos ? target.substr(0, pos) : "";
   TWPartition* t_part = PartitionManager.FindPartitionByPath(mount_point);
-  bool flash_in_both_slots = DataManager::GetIntValue("tw_flash_both_slots") ? true : false;
 
-  if (t_part != NULL && (flash_in_both_slots && t_part->IsSlotSelect())) {
+  if (t_part != NULL && (both_slots && t_part->IsSlotSelect())) {
     std::string current_slot = PartitionManager.GetActiveSlotDisplay();
     bool pre_op_status = PartitionManager.FlashImage(path, filename);
 

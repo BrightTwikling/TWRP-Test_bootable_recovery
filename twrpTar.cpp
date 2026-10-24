@@ -43,7 +43,7 @@
 #include "twcommon.h"
 #include "variables.h"
 #include "twrp_functions.hpp"
-#include "gui/gui.hpp"
+#include "gui2/console/stdio_adapter.h"
 #include "progresstracking.hpp"
 
 #include "data.hpp"
@@ -126,12 +126,12 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 
 	if (pipe2(progress_pipe, O_CLOEXEC) < 0) {
 		LOGINFO("Error creating progress tracking pipe\n");
-		gui_err("backup_error=Error creating backup.");
+		gui2_console::log_error("backup_error");
 		return -1;
 	}
 	if ((*tar_fork_pid = fork()) == -1) {
 		LOGINFO("create tar failed to fork.\n");
-		gui_err("backup_error=Error creating backup.");
+		gui2_console::log_error("backup_error");
 		close(progress_pipe[0]);
 		close(progress_pipe[1]);
 		return -1;
@@ -173,7 +173,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 
 			d = opendir(tardir.c_str());
 			if (d == nullptr) {
-				gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tardir)(strerror(errno)));
+				gui2_console::log_error("error_opening_strerr", tardir, strerror(errno));
 				exit_child(-1);
 			}
 			// Figure out the size of all data to be encrypted and create a list of unencrypted files
@@ -188,7 +188,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 						ret = Generate_TarList(FileName, &RegularList, &target_size, &regular_thread_id);
 						if (ret < 0) {
 							LOGINFO("Error in Generate_TarList with regular list!\n");
-							gui_err("backup_error=Error creating backup.");
+							gui2_console::log_error("backup_error");
 							closedir(d);
 							exit_child(-1);
 						}
@@ -218,7 +218,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 
 			d = opendir(tardir.c_str());
 			if (d == nullptr) {
-				gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tardir)(strerror(errno)));
+				gui2_console::log_error("error_opening_strerr", tardir, strerror(errno));
 				exit_child(-1);
 			}
 			// Divide up the encrypted file list for threading
@@ -236,7 +236,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 						ret = Generate_TarList(FileName, &EncryptList, &target_size, &enc_thread_id);
 						if (ret < 0) {
 							LOGINFO("Error in Generate_TarList with encrypted list!\n");
-							gui_err("backup_error=Error creating backup.");
+							gui2_console::log_error("backup_error");
 							closedir(d);
 							exit_child(-1);
 						}
@@ -256,7 +256,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 			if (enc_thread_id != core_count) {
 				LOGINFO("Error dividing up threads for encryption, %u threads for %u cores!\n", enc_thread_id, core_count);
 				if (enc_thread_id > core_count) {
-					gui_err("backup_error=Error creating backup.");
+					gui2_console::log_error("backup_error");
 					exit_child(-1);
 				} else {
 					LOGINFO("Continuining anyway.");
@@ -282,24 +282,24 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 				LOGINFO("Creating unencrypted backup...\n");
 				if (createList((void*)&reg) != 0) {
 					LOGINFO("Error creating unencrypted backup.\n");
-					gui_err("backup_error=Error creating backup.");
+					gui2_console::log_error("backup_error");
 					exit_child(-1);
 				}
 			}
 
 			if (pthread_attr_init(&tattr)) {
 				LOGINFO("Unable to pthread_attr_init\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				exit_child(-1);
 			}
 			if (pthread_attr_setdetachstate(&tattr, PTHREAD_CREATE_JOINABLE)) {
 				LOGINFO("Error setting pthread_attr_setdetachstate\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				exit_child(-1);
 			}
 			if (pthread_attr_setscope(&tattr, PTHREAD_SCOPE_SYSTEM)) {
 				LOGINFO("Error setting pthread_attr_setscope\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				exit_child(-1);
 			}
 			/*if (pthread_attr_setstacksize(&tattr, 524288)) {
@@ -326,7 +326,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 					LOGINFO("Unable to create %i thread for encryption! %i\nContinuing in same thread (backup will be slower).\n", i, ret);
 					if (createList((void*)&enc[i]) != 0) {
 						LOGINFO("Error creating encrypted backup %i.\n", i);
-						gui_err("backup_error=Error creating backup.");
+						gui2_console::log_error("backup_error");
 						exit_child(-1);
 					} else {
 						enc[i].thread_id = i + 1;
@@ -341,7 +341,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 				if (enc[i].thread_id == i) {
 					if (pthread_join(enc_thread[i], &thread_return)) {
 						LOGINFO("Error joining thread %i\n", i);
-						gui_err("backup_error=Error creating backup.");
+						gui2_console::log_error("backup_error");
 						exit_child(-1);
 					} else {
 						LOGINFO("Joined thread %i.\n", i);
@@ -349,7 +349,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 						if (ret != 0) {
 							thread_error = 1;
 							LOGINFO("Thread %i returned an error %i.\n", i, ret);
-							gui_err("backup_error=Error creating backup.");
+							gui2_console::log_error("backup_error");
 							exit_child(-1);
 						}
 					}
@@ -359,7 +359,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 			}
 			if (thread_error) {
 				LOGINFO("Error returned by one or more threads.\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				exit_child(-1);
 			}
 			LOGINFO("Finished encrypted backup.\n");
@@ -376,7 +376,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 			ret = Generate_TarList(tardir, &FileList, &target_size, &thread_id);
 			if (ret < 0) {
 				LOGINFO("Error in Generate_TarList!\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				exit_child(-1);
 			}
 			file_count = (unsigned long long)(ret);
@@ -390,7 +390,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 			reg.progress_pipe_fd = progress_pipe_fd;
 			reg.part_settings = part_settings;
 			if (Total_Backup_Size > MAX_ARCHIVE_SIZE) {
-				gui_msg("split_backup=Breaking backup file into multiple archives...");
+				gui2_console::info("split_backup");
 				reg.split_archives = 1;
 			} else {
 				reg.split_archives = 0;
@@ -399,7 +399,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 			write(progress_pipe_fd, &file_count, sizeof(file_count));
 			write(progress_pipe_fd, &Total_Backup_Size, sizeof(Total_Backup_Size));
 			if (createList((void*)&reg) != 0) {
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				exit_child(-1);
 			}
 			exit_child(0);
@@ -464,7 +464,7 @@ int twrpTar::extractTarFork() {
 
 	if (pipe(progress_pipe) < 0) {
 		LOGINFO("Error creating progress tracking pipe\n");
-		gui_err("restore_error=Error during restore process.");
+		gui2_console::log_error("restore_error");
 		return -1;
 	}
 
@@ -498,7 +498,7 @@ int twrpTar::extractTarFork() {
 				tarfn += "000";
 				if (!TWFunc::IsPathExists(tarfn)) {
 					LOGINFO("Unable to locate '%s' or '%s'\n", basefn.c_str(), tarfn.c_str());
-					gui_err("restore_error=Error during restore process.");
+					gui2_console::log_error("restore_error");
 					close(progress_pipe_fd);
 					_exit(-1);
 				}
@@ -510,7 +510,7 @@ int twrpTar::extractTarFork() {
 					tars[0].part_settings = part_settings;
 					if (extractMulti((void*)&tars[0]) != 0) {
 						LOGINFO("Error extracting split archive.\n");
-						gui_err("restore_error=Error during restore process.");
+						gui2_console::log_error("restore_error");
 						close(progress_pipe_fd);
 						_exit(-1);
 					}
@@ -520,19 +520,19 @@ int twrpTar::extractTarFork() {
 				// Start threading encrypted restores
 				if (pthread_attr_init(&tattr)) {
 					LOGINFO("Unable to pthread_attr_init\n");
-					gui_err("restore_error=Error during restore process.");
+					gui2_console::log_error("restore_error");
 					close(progress_pipe_fd);
 					_exit(-1);
 				}
 				if (pthread_attr_setdetachstate(&tattr, PTHREAD_CREATE_JOINABLE)) {
 					LOGINFO("Error setting pthread_attr_setdetachstate\n");
-					gui_err("restore_error=Error during restore process.");
+					gui2_console::log_error("restore_error");
 					close(progress_pipe_fd);
 					_exit(-1);
 				}
 				if (pthread_attr_setscope(&tattr, PTHREAD_SCOPE_SYSTEM)) {
 					LOGINFO("Error setting pthread_attr_setscope\n");
-					gui_err("restore_error=Error during restore process.");
+					gui2_console::log_error("restore_error");
 					close(progress_pipe_fd);
 					_exit(-1);
 				}
@@ -556,7 +556,7 @@ int twrpTar::extractTarFork() {
 							LOGINFO("Unable to create %i thread for extraction! %i\nContinuing in same thread (restore will be slower).\n", i, ret);
 							if (extractMulti((void*)&tars[i]) != 0) {
 								LOGINFO("Error extracting backup in thread %i.\n", i);
-								gui_err("restore_error=Error during restore process.");
+								gui2_console::log_error("restore_error");
 								close(progress_pipe_fd);
 								_exit(-1);
 							} else {
@@ -572,7 +572,7 @@ int twrpTar::extractTarFork() {
 					if (tars[i].thread_id == i) {
 						if (pthread_join(tar_thread[i], &thread_return)) {
 							LOGINFO("Error joining thread %i\n", i);
-							gui_err("restore_error=Error during restore process.");
+							gui2_console::log_error("restore_error");
 							close(progress_pipe_fd);
 							_exit(-1);
 						} else {
@@ -581,7 +581,7 @@ int twrpTar::extractTarFork() {
 							if (ret != 0) {
 								thread_error = 1;
 								LOGINFO("Thread %i returned an error %i.\n", i, ret);
-								gui_err("restore_error=Error during restore process.");
+								gui2_console::log_error("restore_error");
 								close(progress_pipe_fd);
 								_exit(-1);
 							}
@@ -592,7 +592,7 @@ int twrpTar::extractTarFork() {
 				}
 				if (thread_error) {
 					LOGINFO("Error returned by one or more threads.\n");
-					gui_err("restore_error=Error during restore process.");
+					gui2_console::log_error("restore_error");
 					close(progress_pipe_fd);
 					_exit(-1);
 				}
@@ -641,7 +641,7 @@ int twrpTar::Generate_TarList(string Path, std::vector<TarListStruct> *TarList, 
 
 	d = opendir(Path.c_str());
 	if (d == NULL) {
-		gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(Path)(strerror(errno)));
+		gui2_console::log_error("error_opening_strerr", Path, strerror(errno));
 		closedir(d);
 		return -1;
 	}
@@ -681,12 +681,12 @@ int twrpTar::extractTar() {
 		return -1;
 	if (tar_extract_all(t, charRootDir, &progress_pipe_fd) != 0) {
 		LOGINFO("Unable to extract tar archive '%s'\n", tarfn.c_str());
-		gui_err("restore_error=Error during restore process.");
+		gui2_console::log_error("restore_error");
 		return -1;
 	}
 	if (tar_close(t) != 0) {
 		LOGINFO("Unable to close tar file\n");
-		gui_err("restore_error=Error during restore process.");
+		gui2_console::log_error("restore_error");
 		return -1;
 	}
 	return 0;
@@ -704,12 +704,12 @@ int twrpTar::extract() {
 	} else if (current_archive_type == ENCRYPTED) {
 		int ret = TWFunc::TryDecryptingFile(tarfn, password);
 		if (ret < 1) {
-			gui_msg(Msg(msg::kError, "fail_decrypt_tar=Failed to decrypt tar file '{1}'")(tarfn));
+			gui2_console::log_error("fail_decrypt_tar", tarfn);
 			return -1;
 		}
 		if (ret == 1) {
 			LOGINFO("Decrypted file is not in tar format.\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			return -1;
 		}
 		if (ret == 3) {
@@ -746,7 +746,7 @@ int twrpTar::tarList(std::vector<TarListStruct> *TarList, unsigned thread_id) {
 
 	if (createTar() != 0) {
 		LOGINFO("Error creating tar '%s' for thread %i\n", tarfn.c_str(), thread_id);
-		gui_err("backup_error=Error creating backup.");
+		gui2_console::log_error("backup_error");
 		return -2;
 	}
 	Archive_Current_Size = 0;
@@ -760,21 +760,21 @@ int twrpTar::tarList(std::vector<TarListStruct> *TarList, unsigned thread_id) {
 				if (split_archives && Archive_Current_Size + fs > MAX_ARCHIVE_SIZE) {
 					if (closeTar() != 0) {
 						LOGINFO("Error closing '%s' on thread %i\n", tarfn.c_str(), thread_id);
-						gui_err("backup_error=Error creating backup.");
+						gui2_console::log_error("backup_error");
 						return -3;
 					}
 					archive_count++;
-					gui_msg(Msg("split_thread=Splitting thread ID {1} into archive {2}")(thread_id)(archive_count + 1));
+					gui2_console::info("split_thread", thread_id, archive_count + 1);
 					if (archive_count > 999) {
 						LOGINFO("Too many archives for thread %i\n", thread_id);
-						gui_err("backup_error=Error creating backup.");
+						gui2_console::log_error("backup_error");
 						return -4;
 					}
 					snprintf(actual_filename, sizeof(actual_filename), temp.c_str(), thread_id, archive_count);
 					tarfn = actual_filename;
 					if (createTar() != 0) {
 						LOGINFO("Error creating tar '%s' for thread %i\n", tarfn.c_str(), thread_id);
-						gui_err("backup_error=Error creating backup.");
+						gui2_console::log_error("backup_error");
 						return -2;
 					}
 					Archive_Current_Size = 0;
@@ -786,7 +786,7 @@ int twrpTar::tarList(std::vector<TarListStruct> *TarList, unsigned thread_id) {
 			LOGINFO("addFile '%s' including root: %i\n", buf, include_root_dir);
 			if (addFile(buf, include_root_dir) != 0) {
 				LOGINFO("Error adding file '%s' to '%s'\n", buf, tarfn.c_str());
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				return -1;
 			}
 		}
@@ -794,7 +794,7 @@ int twrpTar::tarList(std::vector<TarListStruct> *TarList, unsigned thread_id) {
 	}
 	if (closeTar() != 0) {
 		LOGINFO("Error closing '%s' on thread %i\n", tarfn.c_str(), thread_id);
-		gui_err("backup_error=Error creating backup.");
+		gui2_console::log_error("backup_error");
 		return -3;
 	}
 	LOGINFO("Thread id %i tarList done, %i archives.\n", thread_id, archive_count);
@@ -863,17 +863,17 @@ int twrpTar::createTar() {
 
 		if (pipe2(pipes, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating first pipe\n");
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			return -1;
 		}
 		if (pipe2(pipes + 2, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating second pipe\n");
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			return -1;
 		}
 		output_fd = open(tarfn.c_str(), O_CLOEXEC | O_WRONLY | O_CREAT | O_EXCL | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 		if (output_fd < 0) {
-			gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tarfn)(strerror(errno)));
+			gui2_console::log_error("error_opening_strerr", tarfn, strerror(errno));
 			for (i = 0; i < 4; i++)
 				close(pipes[i]); // close all
 			return -1;
@@ -882,7 +882,7 @@ int twrpTar::createTar() {
 
 		if (pigz_pid < 0) {
 			LOGINFO("pigz fork() failed\n");
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			close(output_fd);
 			for (i = 0; i < 4; i++)
 				close(pipes[i]); // close all
@@ -893,7 +893,7 @@ int twrpTar::createTar() {
 			dup2(pipes[3], STDOUT_FILENO);
 			if (execlp("pigz", "pigz", "-", NULL) < 0) {
 				LOGINFO("execlp pigz ERROR!\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				_exit(-1);
 			}
 		} else {
@@ -902,7 +902,7 @@ int twrpTar::createTar() {
 
 			if (oaes_pid < 0) {
 				LOGINFO("aes fork() failed\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				close(output_fd);
 				for (i = 0; i < 4; i++)
 					close(pipes[i]); // close all
@@ -923,7 +923,7 @@ int twrpTar::createTar() {
 				if (tar_fdopen(&t, fd, charRootDir, &tar_type, O_CLOEXEC | O_WRONLY | O_CREAT | O_EXCL | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) != 0) {
 					close(fd);
 					LOGINFO("tar_fdopen failed\n");
-					gui_err("backup_error=Error creating backup.");
+					gui2_console::log_error("backup_error");
 					return -1;
 				}
 				return 0;
@@ -936,13 +936,13 @@ int twrpTar::createTar() {
 		int pigzfd[2];
 		output_fd = open(tarfn.c_str(), O_CLOEXEC | O_WRONLY | O_CREAT | O_EXCL | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 		if (output_fd < 0) {
-			gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tarfn)(strerror(errno)));
+			gui2_console::log_error("error_opening_strerr", tarfn, strerror(errno));
 			return -1;
 		}
 
 		if (pipe2(pigzfd, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating pipe\n");
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			close(output_fd);
 			return -1;
 		}
@@ -950,7 +950,7 @@ int twrpTar::createTar() {
 
 		if (pigz_pid < 0) {
 			LOGINFO("fork() failed\n");
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			close(output_fd);
 			close(pigzfd[0]);
 			close(pigzfd[1]);
@@ -961,7 +961,7 @@ int twrpTar::createTar() {
 			dup2(output_fd, STDOUT_FILENO); // remap stdout to output file
 			if (execlp("pigz", "pigz", "-", NULL) < 0) {
 				LOGINFO("execlp pigz ERROR!\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				_exit(-1);
 			}
 		} else {
@@ -973,7 +973,7 @@ int twrpTar::createTar() {
 			if (tar_fdopen(&t, fd, charRootDir, &tar_type, O_CLOEXEC | O_WRONLY | O_CREAT | O_EXCL | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) != 0) {
 				close(fd);
 				LOGINFO("tar_fdopen failed\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				return -1;
 			}
 		}
@@ -984,12 +984,12 @@ int twrpTar::createTar() {
 		int oaesfd[2];
 		output_fd = open(tarfn.c_str(), O_CLOEXEC | O_WRONLY | O_CREAT | O_EXCL | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 		if (output_fd < 0) {
-			gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tarfn)(strerror(errno)));
+			gui2_console::log_error("error_opening_strerr", tarfn, strerror(errno));
 			return -1;
 		}
 		if (pipe2(oaesfd, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating pipe\n");
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			close(output_fd);
 			return -1;
 		}
@@ -997,7 +997,7 @@ int twrpTar::createTar() {
 
 		if (oaes_pid < 0) {
 			LOGINFO("fork() failed\n");
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			close(output_fd);
 			close(oaesfd[0]);
 			close(oaesfd[1]);
@@ -1016,7 +1016,7 @@ int twrpTar::createTar() {
 			if (tar_fdopen(&t, fd, charRootDir, &tar_type, O_CLOEXEC | O_WRONLY | O_CREAT | O_EXCL | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) != 0) {
 				close(fd);
 				LOGINFO("tar_fdopen failed\n");
-				gui_err("backup_error=Error creating backup.");
+				gui2_console::log_error("backup_error");
 				return -1;
 			}
 			return 0;
@@ -1028,7 +1028,7 @@ int twrpTar::createTar() {
 		tar_type.writefunc = write_tar;
 		if (tar_open(&t, charTarFile, &tar_type, O_CLOEXEC | O_WRONLY | O_CREAT | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) == -1) {
 			LOGERR("tar_open error opening '%s'\n", tarfn.c_str());
-			gui_err("backup_error=Error creating backup.");
+			gui2_console::log_error("backup_error");
 			return -1;
 		}
 	}
@@ -1045,19 +1045,19 @@ int twrpTar::openTar() {
 		int i, pipes[4];
 		input_fd = open(tarfn.c_str(), O_CLOEXEC | O_RDONLY | O_LARGEFILE);
 		if (input_fd < 0) {
-			gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tarfn)(strerror(errno)));
+			gui2_console::log_error("error_opening_strerr", tarfn, strerror(errno));
 			return -1;
 		}
 
 		if (pipe2(pipes, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating first pipe\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			close(input_fd);
 			return -1;
 		}
 		if (pipe2(pipes + 2, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating second pipe\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			close(pipes[0]);
 			close(pipes[1]);
 			close(input_fd);
@@ -1067,7 +1067,7 @@ int twrpTar::openTar() {
 
 		if (oaes_pid < 0) {
 			LOGINFO("pigz fork() failed\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			close(input_fd);
 			for (i = 0; i < 4; i++)
 				close(pipes[i]); // close all
@@ -1083,7 +1083,7 @@ int twrpTar::openTar() {
 
 			if (pigz_pid < 0) {
 				LOGINFO("pigz fork() failed\n");
-				gui_err("restore_error=Error during restore process.");
+				gui2_console::log_error("restore_error");
 				close(input_fd);
 				for (i = 0; i < 4; i++)
 					close(pipes[i]); // close all
@@ -1094,7 +1094,7 @@ int twrpTar::openTar() {
 				dup2(pipes[3], STDOUT_FILENO);
 				if (execlp("pigz", "pigz", "-d", "-c", NULL) < 0) {
 					LOGINFO("execlp pigz ERROR!\n");
-					gui_err("restore_error=Error during restore process.");
+					gui2_console::log_error("restore_error");
 					_exit(-1);
 				}
 			} else {
@@ -1106,7 +1106,7 @@ int twrpTar::openTar() {
 				if (tar_fdopen(&t, fd, charRootDir, NULL, O_CLOEXEC | O_RDONLY | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) != 0) {
 					close(fd);
 					LOGINFO("tar_fdopen failed\n");
-					gui_err("restore_error=Error during restore process.");
+					gui2_console::log_error("restore_error");
 					return -1;
 				}
 			}
@@ -1116,13 +1116,13 @@ int twrpTar::openTar() {
 		int oaesfd[2];
 		input_fd = open(tarfn.c_str(), O_CLOEXEC | O_RDONLY | O_LARGEFILE);
 		if (input_fd < 0) {
-			gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tarfn)(strerror(errno)));
+			gui2_console::log_error("error_opening_strerr", tarfn, strerror(errno));
 			return -1;
 		}
 
 		if (pipe2(oaesfd, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating pipe\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			close(input_fd);
 			return -1;
 		}
@@ -1130,7 +1130,7 @@ int twrpTar::openTar() {
 		oaes_pid = fork();
 		if (oaes_pid < 0) {
 			LOGINFO("fork() failed\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			close(input_fd);
 			close(oaesfd[0]);
 			close(oaesfd[1]);
@@ -1148,7 +1148,7 @@ int twrpTar::openTar() {
 			if (tar_fdopen(&t, fd, charRootDir, NULL, O_CLOEXEC | O_RDONLY | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) != 0) {
 				close(fd);
 				LOGINFO("tar_fdopen failed\n");
-				gui_err("restore_error=Error during restore process.");
+				gui2_console::log_error("restore_error");
 				return -1;
 			}
 		}
@@ -1159,13 +1159,13 @@ int twrpTar::openTar() {
 		input_fd = open(tarfn.c_str(), O_CLOEXEC | O_RDONLY | O_LARGEFILE);
 
 		if (input_fd < 0) {
-			gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(tarfn)(strerror(errno)));
+			gui2_console::log_error("error_opening_strerr", tarfn, strerror(errno));
 			return -1;
 		}
 
 		if (pipe2(pigzfd, O_CLOEXEC) < 0) {
 			LOGINFO("Error creating pipe\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			close(input_fd);
 			return -1;
 		}
@@ -1173,7 +1173,7 @@ int twrpTar::openTar() {
 		pigz_pid = fork();
 		if (pigz_pid < 0) {
 			LOGINFO("fork() failed\n");
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			close(input_fd);
 			close(pigzfd[0]);
 			close(pigzfd[1]);
@@ -1184,7 +1184,7 @@ int twrpTar::openTar() {
 			dup2(input_fd, STDIN_FILENO); // remap input fd to stdin
 			if (execlp("pigz", "pigz", "-d", "-c", NULL) < 0) {
 				LOGINFO("execlp pigz ERROR!\n");
-				gui_err("restore_error=Error during restore process.");
+				gui2_console::log_error("restore_error");
 				_exit(-1);
 			}
 		} else {
@@ -1194,14 +1194,14 @@ int twrpTar::openTar() {
 			if (tar_fdopen(&t, fd, charRootDir, NULL, O_CLOEXEC | O_RDONLY | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) != 0) {
 				close(fd);
 				LOGINFO("tar_fdopen failed\n");
-				gui_err("restore_error=Error during restore process.");
+				gui2_console::log_error("restore_error");
 				return -1;
 			}
 		}
 	} else  {
 		if (tar_open(&t, charTarFile, NULL, O_CLOEXEC | O_RDONLY | O_LARGEFILE, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH, TWTAR_FLAGS) != 0) {
 			LOGERR("Unable to open tar archive '%s'\n", charTarFile);
-			gui_err("restore_error=Error during restore process.");
+			gui2_console::log_error("restore_error");
 			return -1;
 		}
 	}
@@ -1269,7 +1269,7 @@ int twrpTar::closeTar() {
 		}
 	}
 	if (TWFunc::GetFileSize(tarfn) == 0) {
-		gui_msg(Msg(msg::kError, "backup_size=Backup file size for '{1}' is 0 bytes.")(tarfn));
+		gui2_console::log_error("backup_size", tarfn);
 		return -1;
 	}
 	tw_set_default_metadata(tarfn.c_str());
@@ -1429,7 +1429,7 @@ uint64_t twrpTar::uncompressedSize(const string& filename) {
 	} else if (current_archive_type == COMPRESSED_ENCRYPTED) {
 		int ret = TWFunc::TryDecryptingFile(filename, password);
 		if (ret < 1) {
-			gui_msg(Msg(msg::kError, "fail_decrypt_tar=Failed to decrypt tar file '{1}'")(tarfn));
+			gui2_console::log_error("fail_decrypt_tar", tarfn);
 			total_size = TWFunc::GetFileSize(filename);
 		} else if (ret == 1) {
 			LOGERR("Decrypted file is not in tar format.\n");

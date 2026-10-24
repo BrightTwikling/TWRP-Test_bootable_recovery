@@ -27,7 +27,7 @@ genrule {
 cc_library_shared {
     name: "libgui2",
     recovery: true,
-    defaults: ["twrp_defaults"],
+    defaults: ["twrp_defaults", "gui2_resources_defaults"],
     cflags: [
         "-DLV_CONF_INCLUDE_SIMPLE",
         "-DLV_LVGL_H_INCLUDE_SIMPLE",
@@ -40,7 +40,7 @@ cc_library_shared {
     include_dirs: [
         "bootable/recovery",
         "external/lvgl",
-        "bootable/recovery/gui/include",
+        "bootable/recovery/twrpminui/include",
         "bootable/recovery/twrpperf/include",
     ],
     generated_headers: [
@@ -48,6 +48,7 @@ cc_library_shared {
         "gui2_splash_assets_header",
     ],
     srcs: [
+        "console/messages.cpp",
         "app/gui2_loop.cpp",
         "app/gui2_lifecycle.cpp",
         "app/screen_actions.cpp",
@@ -135,9 +136,24 @@ cc_library_shared {
         "liblog",
         "libtwrpminui",
         "libtwrpperf",
-        "libtwmsg_twrp",
         "liblvgl_twrp",
         "libvpx",
         "libwebm_mkvmuxer",
     ],
+}
+
+// Standalone console/catalogue tests: no LVGL, minui or recovery runtime.
+cc_test_host {
+    name: "gui2_console_messages_test",
+    srcs: [
+        "console/tests/messages_test.cpp",
+        "console/tests/macro_compatibility_test.cpp",
+        "console/messages.cpp",
+        "i18n/i18n.cpp",
+        "i18n/en.cpp",
+        "i18n/zh_cn.cpp",
+        "i18n/zh_tw.cpp",
+        "i18n/ru.cpp",
+    ],
+    include_dirs: ["bootable/recovery"],
 }

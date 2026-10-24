@@ -26,7 +26,7 @@ class twrp_install_backend final : public install_backend {
 
  private:
   void run_zip(std::vector<std::string> zip_queue);
-  void run_image();
+  void run_image(std::string path, std::string mount_point, bool both_slots);
   void join_finished_thread();
 
   std::thread worker_;

@@ -1,0 +1,10 @@
+bootstrap_go_package {
+    name: "soong-gui2-resources",
+    pkgPath: "bootable/recovery/gui2/resources",
+    deps: ["soong", "soong-android", "soong-cc"],
+    srcs: ["resources.go", "../../soong/copy.go", "../../soong/makevars.go", "../../soong/variables.go"],
+    pluginFor: ["soong_build"],
+}
+gui2_resources_defaults {
+    name: "gui2_resources_defaults",
+}
