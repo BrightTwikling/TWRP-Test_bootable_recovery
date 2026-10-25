@@ -238,7 +238,9 @@ bool isUpdatePkg(ZipArchiveHandle Zip) {
 	if (FindEntry(Zip, UPDATE_DYNAMIC_PART_OP_LIST_NAME, &find_entry) == 0) return true;
 	if (FindEntry(Zip, UPDATE_SUPER_IMAGE_ZST, &find_entry) == 0) return true;
 	if (FindEntry(Zip, UPDATE_SUPER_ZST, &find_entry) == 0) return true;
+#ifdef AB_OTA_UPDATER
 	if (FindEntry(Zip, AB_OTA, &find_entry) == 0) return true;
+#endif
 	return false;
 }
 
@@ -326,6 +328,7 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 		std::string ab_binary_name(AB_OTA);
 		ZipEntry64 ab_binary_entry;
 		if (FindEntry(Zip, ab_binary_name, &ab_binary_entry) == 0) {
+#ifdef AB_OTA_UPDATER
 			LOGINFO("AB zip\n");
 			gui_msg(Msg(msg::kHighlight, "flash_ab_inactive=Flashing A/B zip to inactive slot: {1}")(PartitionManager.GetActiveSlotDisplay()=="A"?"B":"A"));
 			// We need this so backuptool can do its magic
@@ -342,17 +345,23 @@ int TWinstall_zip(const char* path, int* wipe_cache, bool check_for_digest) {
 				PartitionManager.UnmountByPath("/vendor", false);
 			if (!system_mount_state)
 				PartitionManager.UnmountByPath(PartitionManager.GetAndroidRootPath(), false);
-			if (android::base::GetBoolProperty("ro.virtual_ab.enabled", false)) {
-				PartitionManager.UnlockBlockPartitions();
-				PartitionManager.PrepareAllSuperVolumes();
-				gui_warn("mount_vab_partitions=Devices on super may not mount until rebooting recovery.");
+			if (ret_val == INSTALL_SUCCESS) {
+				if (android::base::GetBoolProperty("ro.virtual_ab.enabled", false)) {
+					PartitionManager.UnlockBlockPartitions();
+					PartitionManager.PrepareAllSuperVolumes();
+					gui_warn("mount_vab_partitions=Devices on super may not mount until rebooting recovery.");
+				}
+				gui_warn("flash_ab_reboot=To flash additional zips, please reboot recovery to switch to the updated slot.");
+				DataManager::GetValue(TW_AUTO_REFLASHTWRP_VAR, reflashtwrp);
+				if (reflashtwrp) {
+					twrpRepacker repacker;
+					repacker.Flash_Current_Twrp();
+				}
 			}
-			gui_warn("flash_ab_reboot=To flash additional zips, please reboot recovery to switch to the updated slot.");
-			DataManager::GetValue(TW_AUTO_REFLASHTWRP_VAR, reflashtwrp);
-			if (reflashtwrp) {
-			twrpRepacker repacker;
-			repacker.Flash_Current_Twrp();
-			}
+#else
+			gui_err("no_ab_support=A/B OTA zip is not supported on non-A/B devices");
+			ret_val = INSTALL_CORRUPT;
+#endif
 		} else {
 			std::string binary_name("ui.xml");
 			ZipEntry64 binary_entry;

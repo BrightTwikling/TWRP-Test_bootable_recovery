@@ -55,10 +55,8 @@ cc_library_static {
 
     defaults: [
         "libtwrpinstall_defaults",
-    ],
-
-    cflags: [
-        "-DAB_OTA_UPDATER=1"
+        "twrp_defaults",
+        "twrp_cflags_defaults",
     ],
 
     include_dirs: [

@@ -74,6 +74,23 @@ func TestTwrpBooleanFlags(t *testing.T) {
 		}
 	}
 }
+func TestTwrpAbOtaUpdaterFlag(t *testing.T) {
+	for _, enabled := range []string{"true", `"true"`} {
+		flags := flagsForTest(t, map[string]string{"AB_OTA_UPDATER": enabled})
+		if !reflect.DeepEqual(flags[len(flags)-1:], []string{"-DAB_OTA_UPDATER=1"}) {
+			t.Fatalf("AB_OTA_UPDATER=%q produced %q, want -DAB_OTA_UPDATER=1", enabled, flags)
+		}
+	}
+	for _, disabled := range []string{"false", `"false"`, "", " ", `""`} {
+		flags := flagsForTest(t, map[string]string{"AB_OTA_UPDATER": disabled})
+		for _, flag := range flags {
+			if strings.Contains(flag, "AB_OTA_UPDATER") {
+				t.Fatalf("AB_OTA_UPDATER=%q unexpectedly produced %q", disabled, flag)
+			}
+		}
+	}
+}
+
 
 func TestTwrpNumericFlags(t *testing.T) {
 	flags := flagsForTest(t, map[string]string{"TW_CUSTOM_POWER_BUTTON": `"116"`, "BOARD_BOOT_HEADER_VERSION": "004"})

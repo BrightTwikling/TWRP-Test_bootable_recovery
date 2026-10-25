@@ -393,7 +393,11 @@ static int try_update_binary(const std::string& package, ZipArchiveHandle zip, b
   ZipEntry64 binary_entry;
   if (FindEntry(zip, binary_name, &binary_entry) != 0) {
     LOG(ERROR) << "Failed to find update binary " << UPDATE_BINARY_NAME;
+#ifdef AB_OTA_UPDATER
     is_ab = true;
+#else
+    return INSTALL_CORRUPT;
+#endif
   }
 
   if (int update_status =
@@ -401,7 +405,7 @@ static int try_update_binary(const std::string& package, ZipArchiveHandle zip, b
                 : SetUpNonAbUpdateCommands(package, zip, retry_count, pipe_write.get(), &args);
       update_status != 0) {
     log_buffer->push_back(android::base::StringPrintf("error: %d", kUpdateBinaryCommandFailure));
-    // return update_status;
+    return update_status;
   }
 
   pid_t pid = fork();

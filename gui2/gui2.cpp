@@ -1308,7 +1308,7 @@ static void show_reboot_page(page_transition transition) {
   options.error_text = page_state.reboot.has_error ? strings().reboot_failed : nullptr;
   options.warning_text = no_os ? strings().no_os_warning : nullptr;
   // Legacy's fastboot reboot page has no slot choice.
-  options.has_boot_slots = capabilities.boot_slots && !fastboot_mode;
+  options.has_boot_slots = capabilities.boot_slots && !fastboot_mode && !active_slot.empty();
   options.current_slot_text = current_slot_text.c_str();
   options.active_slot = &shown_slot;
   options.slots = page_state.reboot.slots;
@@ -4217,7 +4217,7 @@ static void show_backup_page(page_transition transition) {
   options.disable_free_space_target = &kBackupFreeSpaceTarget;
   options.password_mismatch = page_state.backup_password_mismatch;
   static std::string backup_slot_text;
-  if (reboot != nullptr && reboot->capabilities().boot_slots) {
+  if (reboot != nullptr && reboot->capabilities().boot_slots && !reboot->active_slot().empty()) {
     backup_slot_text = format_text(strings().backup_slot_label, reboot->active_slot());
     options.slot_label = backup_slot_text.c_str();
     options.slot_a_callback = backup_slot_a_cb;

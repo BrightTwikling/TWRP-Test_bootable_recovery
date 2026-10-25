@@ -75,6 +75,9 @@ func twrpFlags(getVar func(string) string) ([]string, error) {
 		makeVarScalar(getVar("TW_USE_FSCRYPT_POLICY")) == "1" {
 		flags = append(flags, "-DUSE_FSCRYPT_POLICY_V1")
 	}
+	if makeBoolValue(getVar("AB_OTA_UPDATER")) {
+		flags = append(flags, "-DAB_OTA_UPDATER=1")
+	}
 
 	if makeCStringLiteral(getVar("TW_LOAD_VENDOR_MODULES")) != "" {
 		for _, name := range []string{

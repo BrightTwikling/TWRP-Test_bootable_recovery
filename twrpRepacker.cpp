@@ -269,7 +269,11 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
 	if (part->IsSlotSelect()) {
 		if (Repack_Options.Type == REPLACE_RAMDISK || Repack_Options.Type == REPLACE_RAMDISK_UNPACKED) {
 			LOGINFO("Switching slots to flash ramdisk to both partitions\n");
-			string Current_Slot = PartitionManager.GetActiveSlotDisplay();
+			const string Current_Slot = PartitionManager.GetActiveSlotDisplay();
+			struct SlotRestorer {
+				~SlotRestorer() { PartitionManager.OverrideActiveSlot(slot); }
+				std::string slot;
+			} restorer{Current_Slot};
 			if (Current_Slot == "A")
 				PartitionManager.OverrideActiveSlot("B");
 			else
@@ -316,17 +320,17 @@ bool twrpRepacker::Repack_Image_And_Flash(const std::string& Target_Image, const
 	TWFunc::RemoveDir(REPACK_NEW_DIR, false);
 	if (dest_partition == "/boot")
 		gui_msg(Msg(msg::kWarning, "repack_overwrite_warning=If device was previously rooted, then root has been overwritten and will need to be reinstalled."));
-	string Current_Slot = PartitionManager.GetActiveSlotDisplay();
-	if (Current_Slot == "A")
-		PartitionManager.OverrideActiveSlot("B");
-	else
-		PartitionManager.OverrideActiveSlot("A");
 	return true;
 }
 
 bool twrpRepacker::Flash_Current_Twrp() {
+#ifdef AB_OTA_UPDATER
 	// A/B with dedicated recovery partition
 	auto module = BootControlClient::WaitForService();
+	if (module == nullptr) {
+		LOGERR("Boot control HAL unavailable\n");
+		return false;
+	}
 	int32_t slot = module->GetCurrentSlot();
 	
 	if (PartitionManager.FindPartitionByPath("/recovery")) {
@@ -354,6 +358,12 @@ bool twrpRepacker::Flash_Current_Twrp() {
 		// if we reach here, something is awry - bale out
 		return false;
 	}
+#else
+	if (PartitionManager.FindPartitionByPath("/recovery")) {
+		gui_err("flash_current_twrp_not_supported=Flash Current TWRP is not supported on non-A/B devices with dedicated recovery");
+		return false;
+	}
+#endif // AB_OTA_UPDATER
 
 	if (!TWFunc::IsPathExists("/ramdisk-files.txt")) {
 			LOGERR("can not find ramdisk-files.txt");

@@ -2816,15 +2816,16 @@ void TWPartition::FindActualBlockDevice() {
   // device for itself: mounting the raw node instead can only fail EBUSY. So the
   // decrypted device wins whenever it exists, even with the CE keys dropped by
   // MarkDataLocked() in between.
+  const std::string slot_suffix = PartitionManager.GetActiveSlotSuffix();
   if (!decrypted_block_device_.empty()) {
     actual_block_device_ = decrypted_block_device_;
     if (TWFunc::IsPathExists(decrypted_block_device_)) {
       is_present_ = true;
       return;
     }
-  } else if (slot_select_ && TWFunc::IsPathExists(
-                 original_block_device_ + PartitionManager.GetActiveSlotSuffix())) {
-    actual_block_device_ = original_block_device_ + PartitionManager.GetActiveSlotSuffix();
+  } else if (slot_select_ && !slot_suffix.empty() &&
+             TWFunc::IsPathExists(original_block_device_ + slot_suffix)) {
+    actual_block_device_ = original_block_device_ + slot_suffix;
     unlink(original_block_device_.c_str());
     symlink(actual_block_device_.c_str(), original_block_device_.c_str());
     // we create a non-slot symlink pointing to the currently selected slot which may assist zips with installing

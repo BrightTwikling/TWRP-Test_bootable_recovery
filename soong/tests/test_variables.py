@@ -173,17 +173,17 @@ int main() {
     def test_optional_external_storage_path(self):
         # Exercise the actual path-selection block with and without the macro.
         partition = (RECOVERY / "partition.cpp").read_text()
-        function = partition.split("void TWPartition::Setup_Data_Media()", 1)[1]
-        block = function.split("Is_Settings_Storage = true;", 1)[1].split("const std::string media0", 1)[0]
+        function = partition.split("void TWPartition::SetupDataMedia()", 1)[1]
+        block = function.split("is_settings_storage_ = true;", 1)[1].split("const std::string media0", 1)[0]
         with tempfile.TemporaryDirectory(prefix="twrp-optional-storage-tests-") as temporary:
             directory = Path(temporary)
             for value, expected in [(None, "/sdcard"), ('"/sdcard"', "/emmc"), ('"/external_sd"', "/sdcard")]:
                 source = directory / "probe.cpp"
                 source.write_text(
                     '#include <string>\n#include <string_view>\nint main() {\n'
-                    + 'std::string Symlink_Mount_Point;\nauto Make_Dir = [](const char*, bool) {};\n'
+                    + 'std::string symlink_mount_point_;\nauto MakeDir = [](const char*, bool) {};\n'
                     + block
-                    + f'\nreturn Symlink_Mount_Point == "{expected}" ? 0 : 1;\n}}\n'
+                    + f'\nreturn symlink_mount_point_ == "{expected}" ? 0 : 1;\n}}\n'
                 )
                 flags = [] if value is None else ["-DTW_EXTERNAL_STORAGE_PATH=" + value]
                 binary = directory / "probe"

@@ -512,7 +512,7 @@ void TWFunc::UpdateIntentFile(const std::string& intent) {
   if (PartitionManager.MountByPath("/cache", false) && !intent.empty()) {
     WriteToFile("/cache/recovery/intent", intent);
   }
-#if defined(TW_CACHE_INTENT_COLOROS) || AB_OTA_UPDATER
+#if defined(TW_CACHE_INTENT_COLOROS) || defined(AB_OTA_UPDATER)
   if (PartitionManager.MountByPath(DATA_LOGS_DIR, false) && !intent.empty()) {
     WriteToFile("/data/cache/recovery/intent", intent);
   }

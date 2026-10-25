@@ -2986,10 +2986,14 @@ void TWPartitionManager::RemovePartitionByPath(const std::string& Path) {
 }
 
 void TWPartitionManager::OverrideActiveSlot(const std::string& slot) {
+#ifdef AB_OTA_UPDATER
   LOGINFO("Overriding slot to '%s'\n", slot.c_str());
   active_slot_display_ = slot;
   DataManager::SetValue("tw_active_slot", slot);
   PartitionManager.UpdateSystemDetails();
+#else
+  LOGERR("Boot slot feature not present, cannot override slot to '%s'\n", slot.c_str());
+#endif
 }
 
 void TWPartitionManager::SetActiveSlot(const std::string& slot) {
@@ -3017,6 +3021,7 @@ void TWPartitionManager::SetActiveSlot(const std::string& slot) {
   }
 #else
   LOGERR("Boot slot feature not present\n");
+  return;
 #endif
   active_slot_display_ = slot;
   if (FstabProcessed()) UpdateSystemDetails();
@@ -3024,7 +3029,8 @@ void TWPartitionManager::SetActiveSlot(const std::string& slot) {
 
 std::string TWPartitionManager::GetActiveSlotSuffix() const {
   if (active_slot_display_ == "A") return "_a";
-  return "_b";
+  if (active_slot_display_ == "B") return "_b";
+  return "";
 }
 
 std::string TWPartitionManager::GetActiveSlotDisplay() {
@@ -3329,12 +3335,16 @@ bool TWPartitionManager::PrepareAllSuperVolumes() {
 
 std::string TWPartitionManager::GetSuperPartition() {
   std::string super_device = "super";
+#ifdef AB_OTA_UPDATER
   if (const auto module = BootControlClient::WaitForService()) {
     super_device = fs_mgr_get_super_partition_name(module->GetCurrentSlot());
   } else {
     // No boot control HAL is available.
     LOGINFO("Boot control HAL unavailable, using static super partition path\n");
   }
+#else
+  LOGINFO("Non-A/B device, using static super partition path\n");
+#endif
   return GetByNamePath(super_device);
 }
 
