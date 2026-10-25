@@ -21,6 +21,7 @@ cc_defaults {
 
     header_libs: [
         "libminadbd_headers",
+        "libvold_headers",
     ],
 
     shared_libs: [
