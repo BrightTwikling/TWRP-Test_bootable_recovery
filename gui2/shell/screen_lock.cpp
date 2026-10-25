@@ -44,6 +44,7 @@ void screen_lock::create(const gui2_core::ui_metrics& metrics, const char* lock_
 void screen_lock::show() {
   if (root_ != nullptr) {
     slider_.reset();
+    lv_obj_move_foreground(root_);
     lv_obj_set_hidden(root_, false);
   }
 }
