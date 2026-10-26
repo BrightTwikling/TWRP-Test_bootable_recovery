@@ -3495,6 +3495,14 @@ bool TWPartitionManager::UnmapSuperDevices() {
     if (fs::symlink_status(entry.path(), ec).type() != fs::file_type::symlink) continue;
     const std::string partition = entry.path().filename();
     if (partition == "userdata") continue;
+    // FindActualBlockDevice creates <name> -> <name>_a/_b aliases, not dm devices.
+    // Read the link itself so aliases remain recognizable after their target is unmapped.
+    const auto target = fs::read_symlink(entry.path(), ec);
+    if (!ec && (target == entry.path().string() + "_a" ||
+                target == entry.path().string() + "_b")) {
+      LOGINFO("Skipping slot alias: %s\n", partition.c_str());
+      continue;
+    }
     LOGINFO("removing dynamic partition: %s\n", partition.c_str());
     if (!DestroyIfMapped(partition)) return false;
   }
