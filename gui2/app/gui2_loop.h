@@ -15,7 +15,10 @@ struct loop_callbacks {
   // A hardware keyboard: a typed character, or a key that is not one.
   void (*on_char)(void* user_data, int ch) = nullptr;
   void (*on_key)(void* user_data, int key_code) = nullptr;
-  void (*after_present)(void* user_data) = nullptr;
+  // Capture page identity before rendering; no LVGL work in this callback.
+  void (*before_render)(void* user_data) = nullptr;
+  // Every iteration; presented means submitted for flip, not scanned out.
+  void (*after_present)(void* user_data, bool presented) = nullptr;
 };
 
 void run_gui2_loop(gui2_backend::screen_backend* screen, lv_indev_t* pointer_indev, void* user_data,

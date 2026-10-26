@@ -284,6 +284,11 @@ static void show_backup_progress_page(page_transition transition);
 static void show_mount_page(page_transition transition);
 static std::string current_storage_snapshot();
 static std::string storage_snapshot;
+// Match submitted frames to page instances, including reopening the same page.
+static size_t page_sequence = 0;
+static size_t rendered_page_sequence = 0;
+static bool rendered_install_page = false;
+static bool rendered_decrypt_page = false;
 static void show_select_storage_page(page_transition transition);
 static void show_restore_list_page(page_transition transition);
 static void show_restore_page(page_transition transition);
@@ -1131,6 +1136,7 @@ static void flush_hardware_settings() {
 static void create_page_scaffold(page_kind page, bool is_home, const char* title,
                                  const char* summary, int bottom_reserved = 0,
                                  page_transition transition = page_transition::NONE) {
+  page_sequence++;
   flush_hardware_settings();
 #if LV_USE_GESTURE_RECOGNITION
   if (pointer_indev != nullptr) {
@@ -1160,7 +1166,8 @@ static void create_page_scaffold(page_kind page, bool is_home, const char* title
   page_state.backup_progress = {};
   page_state.backup_console_consumed = 0;
   page_state.decrypt_progress = {};
-  page_state.decrypt_console_consumed = 0;
+  gui2_pages::console_window_reset(&page_state.decrypt_console);
+  page_state.decrypt_console_armed = false;
   page_state.format_data_input = nullptr;
   page_state.format_data_track = nullptr;
   page_state.format_data_confirm.detach();
@@ -1186,7 +1193,8 @@ static void create_page_scaffold(page_kind page, bool is_home, const char* title
   install_toolbar = {};
   page_state.install_confirm.detach();
   page_state.install_progress = {};
-  page_state.install_console_consumed = 0;
+  gui2_pages::console_window_reset(&page_state.install_console);
+  page_state.install_console_armed = false;
   page_state.terminal_view = {};
   page_state.restore_tabs.detach();
   page_state.restore_confirm.detach();
@@ -3021,14 +3029,41 @@ static void show_install_confirm_page(page_transition transition) {
                                     install_confirmed, nullptr);
 }
 
+// Progress logs keep a bounded window; older output is read again on scroll.
+// No log work runs until a frame containing this page has been submitted.
+static void apply_progress_console_delta(gui2_pages::console_page_view& view,
+                                         const gui2_pages::console_window_delta& delta) {
+  if (delta.dropped_from_top > 0) gui2_pages::drop_console_rows(&view, delta.dropped_from_top);
+  if (delta.dropped_from_bottom > 0)
+    gui2_pages::drop_newest_console_rows(&view, delta.dropped_from_bottom);
+  if (!delta.prepended.empty()) gui2_pages::prepend_console_rows(&view, ui, delta.prepended);
+  if (!delta.appended.empty()) gui2_pages::append_console_lines(&view, ui, delta.appended);
+}
+
+static void poll_progress_console(gui2_pages::console_page_view& view,
+                                  gui2_pages::console_window& window, bool armed) {
+  if (console == nullptr || view.body == nullptr || !armed) return;
+
+  gui2_pages::console_window_viewport viewport;
+  viewport.at_top = lv_obj_get_scroll_top(view.body) <= 0;
+  viewport.at_bottom = lv_obj_get_scroll_bottom(view.body) <= 0;
+
+  const auto limits = gui2_pages::install_console_window_limits();
+  const auto frame =
+      gui2_pages::console_window_step(&window, limits, viewport, console);
+  const auto& delta = frame.delta;
+  if (delta.dropped_from_top == 0 && delta.dropped_from_bottom == 0 && delta.prepended.empty() &&
+      delta.appended.empty())
+    return;
+
+  apply_progress_console_delta(view, delta);
+  // Preserve the scroll anchor while browsing history.
+  if (window.follow) gui2_pages::scroll_console_to_end(view);
+}
+
 static void poll_install_console(void) {
-  if (console == nullptr || page_state.install_progress.console.body == nullptr) return;
-  std::vector<gui2_backend::console_line> lines;
-  const size_t total = console->fetch(page_state.install_console_consumed, &lines);
-  page_state.install_console_consumed = total;
-  if (lines.empty()) return;
-  gui2_pages::append_console_lines(&page_state.install_progress.console, ui, lines);
-  gui2_pages::scroll_console_to_end(page_state.install_progress.console);
+  poll_progress_console(page_state.install_progress.console, page_state.install_console,
+                        page_state.install_console_armed);
 }
 
 static void refresh_install_progress(void) {
@@ -3154,9 +3189,10 @@ static void show_install_progress_page(page_transition transition) {
   if (page_state.install_progress.running_action != nullptr &&
       (page_state.install_countdown_start_ms == 0 || page_state.install_countdown_done))
     lv_obj_set_hidden(page_state.install_progress.running_action, true);
-  page_state.install_console_consumed = 0;
   page_state.install_last_poll_ms = 0;
-  poll_install_console();
+  gui2_pages::console_window_reset(&page_state.install_console);
+  // Defer logs until the progress page has submitted its first frame.
+  page_state.install_console_armed = false;
   refresh_install_progress();
 }
 
@@ -3744,13 +3780,8 @@ static void decrypt_attempt(const std::string& password) {
 }
 
 static void poll_decrypt_console(void) {
-  if (console == nullptr || page_state.decrypt_progress.console.body == nullptr) return;
-  std::vector<gui2_backend::console_line> lines;
-  const size_t total = console->fetch(page_state.decrypt_console_consumed, &lines);
-  page_state.decrypt_console_consumed = total;
-  if (lines.empty()) return;
-  gui2_pages::append_console_lines(&page_state.decrypt_progress.console, ui, lines);
-  gui2_pages::scroll_console_to_end(page_state.decrypt_progress.console);
+  poll_progress_console(page_state.decrypt_progress.console, page_state.decrypt_console,
+                        page_state.decrypt_console_armed);
 }
 
 static void refresh_decrypt_progress(void) {
@@ -3828,9 +3859,9 @@ static void show_decrypt_progress_page(page_transition transition) {
   page_state.decrypt_progress = gui2_pages::build_progress_page(options);
   if (page_state.decrypt_refreshing && page_state.decrypt_progress.elapsed != nullptr)
     lv_obj_set_hidden(page_state.decrypt_progress.elapsed, true);
-  page_state.decrypt_console_consumed = 0;
+  gui2_pages::console_window_reset(&page_state.decrypt_console);
+  page_state.decrypt_console_armed = false;
   page_state.decrypt_last_poll_ms = 0;
-  poll_decrypt_console();
   refresh_decrypt_progress();
 }
 
@@ -6301,9 +6332,29 @@ static void gui2_loop_wheel(void*, int wheel) {
   if (over_content) queue_wheel_scroll(wheel);
 }
 
-static void gui2_loop_after_present(void*) {
+static void gui2_loop_after_present(void*, bool presented) {
   if (!shell_ready) return;
   screen_actions.process_after_present();
+  // A page opened after rendering must wait for its own first frame.
+  if (!page_state.install_console_armed &&
+      gui2_pages::console_window_frame_arms(presented, rendered_install_page,
+                                            rendered_page_sequence == page_sequence) &&
+      page_router.current() == page_kind::INSTALL_PROGRESS &&
+      page_state.install_progress.console.body != nullptr)
+    page_state.install_console_armed = true;
+  if (!page_state.decrypt_console_armed &&
+      gui2_pages::console_window_frame_arms(presented, rendered_decrypt_page,
+                                            rendered_page_sequence == page_sequence) &&
+      page_router.current() == page_kind::DECRYPT_PROGRESS &&
+      page_state.decrypt_progress.console.body != nullptr)
+    page_state.decrypt_console_armed = true;
+}
+
+static void gui2_loop_before_render(void*) {
+  if (!shell_ready) return;
+  rendered_install_page = page_router.current() == page_kind::INSTALL_PROGRESS;
+  rendered_decrypt_page = page_router.current() == page_kind::DECRYPT_PROGRESS;
+  rendered_page_sequence = page_sequence;
 }
 
 int gui2_start(const gui2_context* context) {
@@ -6393,6 +6444,7 @@ int gui2_start(const gui2_context* context) {
   callbacks.on_wheel = gui2_loop_wheel;
   callbacks.on_char = gui2_loop_char;
   callbacks.on_key = gui2_loop_key;
+  callbacks.before_render = gui2_loop_before_render;
   callbacks.after_present = gui2_loop_after_present;
   gui2_app::run_gui2_loop(screen, pointer_indev, nullptr, callbacks);
 

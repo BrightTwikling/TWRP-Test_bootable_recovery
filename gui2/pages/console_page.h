@@ -15,8 +15,7 @@ struct console_page_options {
   const gui2_core::ui_metrics* metrics = nullptr;
   const char* empty_text = nullptr;
   const lv_font_t* font = nullptr;
-  // Embedded in a page that scrolls something else: the box has to own its own
-  // viewport and keep a fixed height instead of growing with the output.
+  // Keep a fixed-height viewport for an embedded console.
   bool self_scrolling = false;
 };
 
@@ -38,6 +37,12 @@ void append_console_lines(console_page_view* view, const gui2_core::ui_metrics& 
                           const std::vector<gui2_backend::console_line>& lines);
 
 void scroll_console_to_end(const console_page_view& view);
+
+// Top insertions/removals compensate scrolling to keep visible rows in place.
+int prepend_console_rows(console_page_view* view, const gui2_core::ui_metrics& metrics,
+                         const std::vector<gui2_backend::console_line>& rows);
+void drop_console_rows(console_page_view* view, size_t count);
+void drop_newest_console_rows(console_page_view* view, size_t count);
 
 // For a view fed from a buffer rather than a stream: the terminal rewrites its
 // last line as output arrives, and the shell may clear the screen outright.

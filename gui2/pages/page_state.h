@@ -17,6 +17,7 @@
 
 #include "components/tab_bar.h"
 #include "pages/console_page.h"
+#include "pages/console_window.h"
 #include "components/keyboard.h"
 #include "pages/terminal_page.h"
 #include "pages/backup_page.h"
@@ -148,7 +149,9 @@ struct page_state {
   uint64_t tool_last_poll_ms = 0;
   gui2_components::keyboard tool_input_keyboard;
   lv_obj_t* tool_input = nullptr;
-  size_t install_console_consumed = 0;
+  console_window install_console;
+  // Log reads start after the first frame for this page has been submitted.
+  bool install_console_armed = false;
   uint64_t install_last_poll_ms = 0;
   bool file_clipboard_move = false;
   lv_obj_t* kernel_log_card = nullptr;
@@ -174,7 +177,8 @@ struct page_state {
   bool decrypt_failed = false;
   bool language_from_decrypt = false;
   progress_page_view decrypt_progress;
-  size_t decrypt_console_consumed = 0;
+  console_window decrypt_console;
+  bool decrypt_console_armed = false;
   uint64_t decrypt_last_poll_ms = 0;
   uint64_t decrypt_prompt_ms = 0;
   bool decrypt_refreshing = false;

@@ -42,6 +42,8 @@ void run_gui2_loop(gui2_backend::screen_backend* screen, lv_indev_t* pointer_ind
     perf_manager.Update();
     screen->tick(loop_start_ms);
     sync_screen_off();
+    // Input below can change the page after this frame has been rendered.
+    if (callbacks.before_render != nullptr) callbacks.before_render(user_data);
     uint32_t delay_ms = lv_timer_handler();
 
     gui2_key_action key_action;
@@ -69,8 +71,9 @@ void run_gui2_loop(gui2_backend::screen_backend* screen, lv_indev_t* pointer_ind
     const int wheel = gui2_input_take_wheel();
     if (wheel != 0 && callbacks.on_wheel != nullptr) callbacks.on_wheel(user_data, wheel);
 
-    if (gui2_display_present(screen, loop_start_ms)) perf_manager.NotifyFrameActivity();
-    if (callbacks.after_present != nullptr) callbacks.after_present(user_data);
+    const bool presented = gui2_display_present(screen, loop_start_ms);
+    if (presented) perf_manager.NotifyFrameActivity();
+    if (callbacks.after_present != nullptr) callbacks.after_present(user_data, presented);
     delay_ms = perf_manager.ClampTimeoutMs(delay_ms);
 
     if (delay_ms == LV_NO_TIMER_READY || delay_ms > 50) delay_ms = 10;
