@@ -21,6 +21,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <signal.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/klog.h>
@@ -41,6 +42,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -210,16 +212,38 @@ bool TWFunc::IsPathExists(const std::string& path) {
 }
 
 void TWFunc::KillForUseTargetProcess(const std::string& target) {
-  if (!target.empty()) {
-    char cmd_buf[256] = { 0 };
-    snprintf(
-        cmd_buf,
-        sizeof(cmd_buf),
-        "lsof | awk '{print($1,$9,$2)}' | grep -v '^recovery ' | awk '{print($2,$3)}' | grep '^%s' | awk '{print $2}' | sort | uniq | xargs kill -9 > /dev/null 2>&1",
-        target.c_str()
-        );
-    std::string ret;
-    ExecCmd(cmd_buf, ret, false);
+  if (target.empty() || target.front() != '/') return;
+
+  std::string directory = target;
+  while (directory.size() > 1 && directory.back() == '/') directory.pop_back();
+  const std::string prefix = directory == "/" ? directory : directory + "/";
+
+  std::string output;
+  if (ExecCmd("lsof", output, false) != 0) {
+    LOGERR("Unable to list processes using '%s'\n", directory.c_str());
+    return;
+  }
+
+  std::vector<pid_t> pids;
+  std::istringstream lines(output);
+  for (std::string line; std::getline(lines, line);) {
+    std::istringstream fields(line);
+    std::string command, column, path;
+    pid_t pid;
+    if (!(fields >> command >> pid) || pid <= 1 || pid == getpid() || command == "recovery") continue;
+    // Toybox lsof: COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME.
+    for (int i = 0; i < 6; ++i) fields >> column;
+    if (!std::getline(fields >> std::ws, path)) continue;
+    if (path == directory || path.starts_with(prefix)) pids.push_back(pid);
+  }
+
+  std::sort(pids.begin(), pids.end());
+  pids.erase(std::unique(pids.begin(), pids.end()), pids.end());
+  for (const pid_t pid : pids) {
+    LOGINFO("Killing pid %d using '%s' before unmount\n", pid, directory.c_str());
+    if (kill(pid, SIGKILL) != 0 && errno != ESRCH) {
+      LOGERR("Unable to kill pid %d: %s\n", pid, strerror(errno));
+    }
   }
 }
 
