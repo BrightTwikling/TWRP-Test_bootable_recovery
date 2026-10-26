@@ -77,6 +77,8 @@ void page_host::start_transition() {
   transition_pending_ = false;
   if (current_page_ == nullptr || previous_page_ == nullptr || metrics_ == nullptr) return;
 
+  clip_previous_page();
+
   // Keep both pages non-interactive until the new page is settled. The
   // blocker is inside page_layer, so the persistent navigation remains usable.
   input_blocker_ = lv_obj_create(layer_);
@@ -99,6 +101,33 @@ void page_host::start_transition() {
   lv_anim_set_completed_cb(&animation, animation_ready);
   transition_active_ = true;
   lv_anim_start(&animation);
+}
+
+void page_host::clip_previous_page() {
+  if (transition_ != gui2_core::page_transition::PUSH) return;
+  previous_clip_ = lv_obj_create(layer_);
+  lv_obj_remove_style_all(previous_clip_);
+  // Match the layer's full clipping area, including any border/padding around
+  // its content origin, so introducing a parent does not trim visible edges.
+  lv_area_t bounds;
+  lv_area_t content;
+  lv_obj_get_coords(layer_, &bounds);
+  lv_obj_get_content_coords(layer_, &content);
+  lv_obj_set_pos(previous_clip_, bounds.x1 - content.x1, bounds.y1 - content.y1);
+  lv_obj_set_size(previous_clip_, lv_obj_get_width(layer_), lv_obj_get_height(layer_));
+  gui2_core::disable_scrolling(previous_clip_);
+  lv_obj_set_clickable(previous_clip_, false);
+  lv_obj_move_to_index(previous_clip_, lv_obj_get_index(previous_page_));
+  lv_obj_set_parent(previous_page_, previous_clip_);
+  lv_obj_set_pos(previous_page_, content.x1 - bounds.x1, content.y1 - bounds.y1);
+}
+
+void page_host::release_previous_clip() {
+  if (previous_clip_ == nullptr) return;
+  // The clip owns the departing page after reparenting.
+  lv_obj_delete(previous_clip_);
+  previous_clip_ = nullptr;
+  previous_page_ = nullptr;
 }
 
 void page_host::settle() {
@@ -156,8 +185,17 @@ void page_host::animation_exec(void* object, int32_t progress) {
     lv_obj_set_x(host->previous_page_, distance);
     lv_obj_set_x(host->current_page_, distance - width);
   } else {
-    lv_obj_set_x(host->previous_page_, -(distance / 4));
+    const int clip_x = host->previous_clip_ == nullptr ? 0 : lv_obj_get_x(host->previous_clip_);
+    lv_obj_set_x(host->previous_page_, -(distance / 4) - clip_x);
     lv_obj_set_x(host->current_page_, width - distance);
+    if (host->previous_clip_ != nullptr) {
+      // Keep pixels behind the entering page's rounded edge, but don't render
+      // the rest of the departing page beneath its opaque interior.
+      const int radius = std::min(lv_obj_get_style_radius(host->current_page_, LV_PART_MAIN),
+                                  std::min(width, lv_obj_get_height(host->current_page_)) / 2);
+      lv_obj_set_width(host->previous_clip_,
+                        std::min(lv_obj_get_width(host->layer_), width - distance + radius + 2 - clip_x));
+    }
   }
 }
 
@@ -170,6 +208,7 @@ void page_host::animation_ready(lv_anim_t* animation) {
 void page_host::finish_transition() {
   if (!transition_active_) return;
   transition_active_ = false;
+  release_previous_clip();
   if (input_blocker_ != nullptr) {
     lv_obj_delete(input_blocker_);
     input_blocker_ = nullptr;
@@ -187,6 +226,8 @@ void page_host::finish_transition() {
 
 void page_host::stop_transition() {
   lv_anim_delete(this, animation_exec);
+  transition_pending_ = false;
+  release_previous_clip();
   if (input_blocker_ != nullptr) {
     lv_obj_delete(input_blocker_);
     input_blocker_ = nullptr;

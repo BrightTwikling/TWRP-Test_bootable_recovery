@@ -44,6 +44,8 @@ class page_host {
   static void animation_exec(void* object, int32_t progress);
   static void animation_ready(lv_anim_t* animation);
 
+  void clip_previous_page();
+  void release_previous_clip();
   void stop_transition();
   void finish_transition();
 
@@ -52,6 +54,7 @@ class page_host {
   lv_obj_t* content_ = nullptr;
   lv_obj_t* current_page_ = nullptr;
   lv_obj_t* previous_page_ = nullptr;
+  lv_obj_t* previous_clip_ = nullptr;
   lv_obj_t* input_blocker_ = nullptr;
   lv_obj_t* fade_ = nullptr;
   int reserved_ = 0;
