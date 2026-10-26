@@ -1,6 +1,8 @@
 #ifndef GUI2_THEME_FONT_MANAGER_H
 #define GUI2_THEME_FONT_MANAGER_H
 
+#include <cstddef>
+
 #include "lvgl.h"
 
 namespace gui2_theme {
@@ -38,6 +40,11 @@ class font_manager {
  private:
   static constexpr int kConsoleSizeCount = 3;
 
+  // TinyTTF borrows these mappings; all sizes share the same immutable bytes.
+  void* ui_data_ = nullptr;
+  size_t ui_data_size_ = 0;
+  void* terminal_data_ = nullptr;
+  size_t terminal_data_size_ = 0;
   lv_font_t* text_ = nullptr;
   lv_font_t* status_ = nullptr;
   lv_font_t* brand_ = nullptr;

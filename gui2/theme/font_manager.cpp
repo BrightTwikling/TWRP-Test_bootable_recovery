@@ -3,6 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <cstdint>
+#include <limits>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace gui2_theme {
 
@@ -27,6 +33,26 @@ int scaled_size(float scale, int base_size) {
 
 constexpr int kConsoleBaseSizes[] = { 28, 34, 42 };
 
+#if LV_USE_TINY_TTF && LV_TINY_TTF_FILE_SUPPORT
+bool map_font(const char* path, void** data, size_t* size) {
+  const int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return false;
+  struct stat info {};
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0 ||
+      static_cast<uintmax_t>(info.st_size) > std::numeric_limits<size_t>::max()) {
+    close(fd);
+    return false;
+  }
+  const size_t length = static_cast<size_t>(info.st_size);
+  void* mapping = mmap(nullptr, length, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  if (mapping == MAP_FAILED) return false;
+  *data = mapping;
+  *size = length;
+  return true;
+}
+#endif
+
 }  // namespace
 
 lv_font_t* font_manager::console(int index) const {
@@ -47,19 +73,29 @@ int font_manager::resize_terminal(int size) {
 
 bool font_manager::initialize(float scale) {
 #if LV_USE_TINY_TTF && LV_TINY_TTF_FILE_SUPPORT
-  text_ = lv_tiny_ttf_create_file(kUiFontPath, scaled_size(scale, 50));
-  status_ = lv_tiny_ttf_create_file(kUiFontPath, scaled_size(scale, 42));
-  brand_ = lv_tiny_ttf_create_file(kUiFontPath, scaled_size(scale, 104));
-  keyboard_ = lv_tiny_ttf_create_file(kUiFontPath, scaled_size(scale, 68));
+  // Assets stay immutable for the lifetime of GUI2. Mapping once avoids the
+  // seek/read pair TinyTTF otherwise performs for individual glyph metrics.
+#ifdef GUI2_HOST_PREVIEW
+  const char* terminal_path = kTerminalFontPath.c_str();
+#else
+  const char* terminal_path = kTerminalFontPath;
+#endif
+  if (!map_font(kUiFontPath, &ui_data_, &ui_data_size_) ||
+      !map_font(terminal_path, &terminal_data_, &terminal_data_size_)) {
+    shutdown();
+    return false;
+  }
+  text_ = lv_tiny_ttf_create_data(ui_data_, ui_data_size_, scaled_size(scale, 50));
+  status_ = lv_tiny_ttf_create_data(ui_data_, ui_data_size_, scaled_size(scale, 42));
+  brand_ = lv_tiny_ttf_create_data(ui_data_, ui_data_size_, scaled_size(scale, 104));
+  keyboard_ = lv_tiny_ttf_create_data(ui_data_, ui_data_size_, scaled_size(scale, 68));
   scale_ = scale;
   terminal_size_ = 34;
-#ifdef GUI2_HOST_PREVIEW
-  terminal_ = lv_tiny_ttf_create_file(kTerminalFontPath.c_str(), scaled_size(scale, terminal_size_));
-#else
-  terminal_ = lv_tiny_ttf_create_file(kTerminalFontPath, scaled_size(scale, terminal_size_));
-#endif
+  terminal_ = lv_tiny_ttf_create_data(terminal_data_, terminal_data_size_,
+                                    scaled_size(scale, terminal_size_));
   for (int i = 0; i < kConsoleSizeCount; ++i)
-    console_[i] = lv_tiny_ttf_create_file(kUiFontPath, scaled_size(scale, kConsoleBaseSizes[i]));
+    console_[i] = lv_tiny_ttf_create_data(ui_data_, ui_data_size_,
+                                        scaled_size(scale, kConsoleBaseSizes[i]));
   if (text_ != nullptr && status_ != nullptr && brand_ != nullptr && terminal_ != nullptr)
     return true;
 #else
@@ -87,6 +123,10 @@ void font_manager::shutdown() {
   status_ = nullptr;
   brand_ = nullptr;
   keyboard_ = nullptr;
+  if (ui_data_ != nullptr) munmap(ui_data_, ui_data_size_);
+  if (terminal_data_ != nullptr) munmap(terminal_data_, terminal_data_size_);
+  ui_data_ = terminal_data_ = nullptr;
+  ui_data_size_ = terminal_data_size_ = 0;
 }
 
 }  // namespace gui2_theme
