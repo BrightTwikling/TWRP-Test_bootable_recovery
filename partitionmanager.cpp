@@ -70,6 +70,7 @@
 #include "twrp_apex.hpp"
 #include "twrp_digest_driver.hpp"
 #include "twrp_functions.hpp"
+#include "twrp_operation_executor.h"
 #include "unit_conversion.hpp"
 #include "variables.h"
 #include "gui/gui.hpp"
@@ -349,6 +350,12 @@ static bool FetchAdditionalFstab(std::string* fstab_filename) {
 bool TWPartitionManager::ProcessFstabFile(const std::string& fstab_filename,
                                           const bool parse_userdata, const bool display_error,
                                           std::map<std::string, FlagsMap>& twrp_flags) {
+  // The primary pass is startup-only. Userdata refinement below is the only
+  // supported replacement; a second primary pass must not append duplicates.
+  if (!parse_userdata && !partitions_.empty()) {
+    LOGERR("Refusing to append a primary fstab to an existing partition table.\n");
+    return false;
+  }
   // Existence probe; the parser re-opens and reads the file.
   if (!parse_userdata && !std::ifstream(fstab_filename)) {
     LOGERR("Critical Error: Unable to open fstab at '%s'.\n", fstab_filename.c_str());
@@ -357,40 +364,60 @@ bool TWPartitionManager::ProcessFstabFile(const std::string& fstab_filename,
   LOGINFO("Reading %s\n", fstab_filename.c_str());
   const auto result = twrp::fstab::ParseFstabFromFile(fstab_filename);
 
-  // The userdata pass replaces /data and /metadata wholesale.
+  if (!result.Ok()) {
+    LOGERR("No usable fstab entries in '%s'; retaining the current partitions.\n", fstab_filename.c_str());
+    return false;
+  }
+  auto pending_flags = twrp_flags;
+  std::vector<std::unique_ptr<TWPartition>> pending;
+
+  // The caller holds the storage transaction through replacement publication.
   const auto erase_partition = [this](const std::string& mount_point) {
-    for (auto it = partitions_.begin(); it != partitions_.end();) {
-      if ((*it)->mount_point_ == mount_point) {
-        delete *it;
-        it = partitions_.erase(it);
-      } else {
-        ++it;
-      }
-    }
+    std::erase_if(partitions_, [&](TWPartition* partition) {
+      if (partition->mount_point_ != mount_point) return false;
+      delete partition;
+      return true;
+    });
   };
 
   for (const auto& entry : result.fstab) {
     if (entry.fs_type == "swap") continue; // Skip swap in recovery
-    if (parse_userdata) {
-      if (entry.mount_point == "/metadata") {
-        erase_partition("/metadata");
-      } else if (entry.mount_point == "/data") {
-        erase_partition("/data");
-      } else {
-        continue;
-      }
-    }
+    if (parse_userdata && entry.mount_point != "/metadata" && entry.mount_point != "/data")
+      continue;
 
     // Rebuild the fstab2 line with the flag columns verbatim so
     // ProcessFstabLine sees the original tokens.
     const std::string line = entry.blk_device + ' ' + entry.mount_point + ' ' +
         entry.fs_type + ' ' + entry.raw_mnt_flags + ' ' + entry.raw_fsmgr_flags;
+    TWPartition* additional_entry = nullptr;
+    if (!parse_userdata) {
+      const auto staged = std::find_if(pending.begin(), pending.end(), [&](const auto& partition) {
+        return partition->mount_point_ == entry.mount_point;
+      });
+      if (staged != pending.end()) additional_entry = staged->get();
+    }
     auto partition = std::make_unique<TWPartition>();
     bool keep = partition->ProcessFstabLine(line.c_str(), display_error,
-                                            parse_userdata ? nullptr : &twrp_flags);
+                                            parse_userdata ? nullptr : &pending_flags,
+                                            additional_entry);
     if (keep && partition->is_super_ && !PrepareSuperVolume(partition.get())) keep = false;
-    if (keep) partitions_.push_back(partition.release());
+    if (!keep) {
+      if (parse_userdata) return false;
+      continue;
+    }
+    if (parse_userdata) {
+      std::erase_if(pending, [&](const auto& old) {
+        return old->mount_point_ == partition->mount_point_;
+      });
+    }
+    pending.push_back(std::move(partition));
   }
+  if (!parse_userdata && pending.empty()) return false;
+  for (auto& partition : pending) {
+    if (parse_userdata) erase_partition(partition->mount_point_);
+    partitions_.push_back(partition.release());
+  }
+  twrp_flags = std::move(pending_flags);
   return true;
 }
 
@@ -410,6 +437,7 @@ void TWPartitionManager::AddRemainingTwrpFlags(const std::map<std::string, Flags
 
 int TWPartitionManager::ProcessFstab(std::string fstab_filename, const bool display_error,
                                      const bool recovery_mode) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   // Without the super device the logical partitions cannot be mapped, so every
   // super entry would fail its DM probe in PrepareSuperVolume.
   const std::string super_partition = GetSuperPartition();
@@ -453,36 +481,18 @@ int TWPartitionManager::ProcessFstab(std::string fstab_filename, const bool disp
   KernelModuleLoader::LoadVendorModules();
 #endif
 
-  if (odm) odm->Unmount(display_error);
-  if (ven) ven->Unmount(display_error);
+  if (odm && !odm->Unmount(display_error)) return false;
+  if (ven && !ven->Unmount(display_error)) return false;
 
   return true;
 }
 
-void TWPartitionManager::SetupFstabPartitions(const bool display_error) {
+bool TWPartitionManager::SetupFstabPartitions(const bool display_error) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   TWPartition* settings_partition = nullptr;
   TWPartition* andsec_partition = nullptr;
   unsigned int storageid = 1 << 16;
   // upper 16 bits are for physical storage device, we pretend to have only one
-
-  for (TWPartition* partition : partitions_) {
-    partition->PartitionPostProcessing(display_error);
-
-    if (partition->is_storage_) {
-      ++storageid;
-      partition->mtp_storage_id_ = storageid;
-    }
-
-    if (!settings_partition && partition->is_settings_storage_ && partition->
-        is_present_)
-      settings_partition = partition;
-    else partition->is_settings_storage_ = false;
-
-    if (!andsec_partition && partition->has_android_secure_ && partition->
-        is_present_)
-      andsec_partition = partition;
-    else partition->has_android_secure_ = false;
-  }
 
   UnlockBlockPartitions();
 
@@ -509,9 +519,33 @@ void TWPartitionManager::SetupFstabPartitions(const bool display_error) {
     }
   }
 #ifndef USE_VENDOR_LIBS
-  if (ven) ven->Unmount(display_error);
-  if (sys) sys->Unmount(display_error);
+  if (ven && !ven->Unmount(display_error)) return false;
+  if (sys && !sys->Unmount(display_error)) return false;
 #endif
+
+  // Finish startup mount cleanup before starting HALs and recovering keys.
+  if (!UnmountByPath("/data", false) && FindPartitionByPath("/data")) return false;
+  UnmountMainPartitions();
+  if (!android::base::SetProperty("twrp.storage.ready", "1")) return false;
+
+  for (TWPartition* partition : partitions_) {
+    partition->PartitionPostProcessing(display_error);
+
+    if (partition->is_storage_) {
+      ++storageid;
+      partition->mtp_storage_id_ = storageid;
+    }
+
+    if (!settings_partition && partition->is_settings_storage_ && partition->
+        is_present_)
+      settings_partition = partition;
+    else partition->is_settings_storage_ = false;
+
+    if (!andsec_partition && partition->has_android_secure_ && partition->
+        is_present_)
+      andsec_partition = partition;
+    else partition->has_android_secure_ = false;
+  }
 
   if (!datamedia && !settings_partition && !FindPartitionByPath("/sdcard") &&
       !FindPartitionByPath("/internal_sd") &&
@@ -561,11 +595,11 @@ void TWPartitionManager::SetupFstabPartitions(const bool display_error) {
 
   UpdateSystemDetails(true);
   if (GetSuperStatus()) SetupSuperPartition();
-  UnmountMainPartitions();
 #ifdef AB_OTA_UPDATER
   DataManager::SetValue("tw_active_slot", GetActiveSlotDisplay());
 #endif
   SetupUevent();
+  return true;
 }
 
 int TWPartitionManager::WriteFstab() const {
@@ -639,13 +673,17 @@ void TWPartitionManager::DecryptData() {
         int retry_count = 10;
         while (!data->Mount(false) && --retry_count) usleep(500);
         if (data->Mount(false)) {
-          if (!data->DecryptFbeDe())
+          if (!data->DecryptFbeDe()) {
             LOGERR("Unable to decrypt FBE device\n");
+            return;
+          }
         } else {
           LOGINFO("Failed to mount data after metadata decrypt\n");
+          return;
         }
       } else {
         LOGINFO("Unable to decrypt metadata encryption\n");
+        return;
       }
 #else
       LOGERR("Metadata FBE decrypt support not present in this TWRP\n");
@@ -777,6 +815,7 @@ void TWPartitionManager::OutputPartition(const TWPartition* part) {
 }
 
 int TWPartitionManager::MountByPath(const std::string& Path, const bool display_error) const {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   int ret = false;
   bool found = false;
   const std::string local_path = TWFunc::GetRootPath(Path);
@@ -805,6 +844,7 @@ int TWPartitionManager::MountByPath(const std::string& Path, const bool display_
 
 bool TWPartitionManager::UnmountByPath(const std::string& path, const bool display_error,
                                        const int flags) const {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   int ret = false;
   bool found = false;
   const std::string local_path = TWFunc::GetRootPath(path);
@@ -854,6 +894,8 @@ int TWPartitionManager::MountSettingsStorage(const bool display_error) const {
 }
 
 TWPartition* TWPartitionManager::FindPartitionByPath(const std::string& Path) const {
+  // Serialize traversal with hotplug changes; callers must protect pointer use too.
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   std::string local_path = TWFunc::GetRootPath(Path);
 
   if (local_path == "/system") local_path = GetAndroidRootPath();
@@ -864,6 +906,7 @@ TWPartition* TWPartitionManager::FindPartitionByPath(const std::string& Path) co
 }
 
 TWPartition* TWPartitionManager::FindPartitionByBlockDevice(const std::string& block_device) const {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   for (TWPartition* partition : partitions_) {
     if (partition->primary_block_device_ == block_device ||
         (!partition->actual_block_device_.empty() && partition->actual_block_device_ ==
@@ -1075,6 +1118,21 @@ bool TWPartitionManager::RunBackup() {
   // tw_backup_list is ';'-joined and ';'-terminated, e.g. "/system;/data;/".
   const std::vector<std::string> backup_paths = TWFunc::SplitString(backup_list, ';', true);
 
+  // Ordinary capacity refreshes do not mount filesystems. Measure each selected
+  // file backup source explicitly before using its cached size for preflight.
+  auto add_backup_size = [&](TWPartition* part) {
+    twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
+    if (part->backup_method_ == BackupMethod::kFiles) {
+      // UpdateSize may treat a failed removable/encrypted mount as success.
+      // Check Mount ourselves, then measure the mounted filesystem synchronously.
+      if (!part->Mount(true) || !part->UpdateSize(true, false, false)) return false;
+      part_settings.file_bytes += part->backup_size_;
+    } else {
+      part_settings.img_bytes += part->backup_size_;
+    }
+    return true;
+  };
+
   int partition_count = 0;
   for (const std::string& path : backup_paths) {
     LOGINFO("backup_path: %s\n", path.c_str());
@@ -1086,11 +1144,8 @@ bool TWPartitionManager::RunBackup() {
       continue;
     }
 
+    if (!add_backup_size(part)) return false;
     partition_count++;
-    if (part->backup_method_ ==
-        BackupMethod::kFiles)
-      part_settings.file_bytes += part->backup_size_;
-    else part_settings.img_bytes += part->backup_size_;
 
     if (part->has_sub_partition_) {
       auto is_backup_sub_partition = [&](const TWPartition* subpart) {
@@ -1098,11 +1153,8 @@ bool TWPartitionManager::RunBackup() {
                subpart->sub_partition_of_ == part->mount_point_;
       };
       for (TWPartition* subpart : partitions_ | std::views::filter(is_backup_sub_partition)) {
+        if (!add_backup_size(subpart)) return false;
         partition_count++;
-        if (subpart->backup_method_ ==
-            BackupMethod::kFiles)
-          part_settings.file_bytes += subpart->backup_size_;
-        else part_settings.img_bytes += subpart->backup_size_;
       }
     }
   }
@@ -1740,6 +1792,7 @@ int TWPartitionManager::ResizeByPath(const std::string& Path, const bool display
 
 void TWPartitionManager::UpdateSystemDetails(const bool defer_data_size,
                                              const bool display_error) const {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   uint64_t data_size = 0;
   TWPartition* deferred = nullptr;
 
@@ -1748,7 +1801,7 @@ void TWPartitionManager::UpdateSystemDetails(const bool defer_data_size,
     // Only /data feeds TW_BACKUP_DATA_SIZE, so only /data is worth deferring.
     const bool defer = defer_data_size && partition->has_data_media_
                        && partition->mount_point_ == "/data";
-    partition->UpdateSize(display_error, defer);
+    partition->UpdateSize(display_error, defer, false);
     if (defer) deferred = partition;
     if (partition->can_be_mounted_) {
       if (partition->mount_point_ == GetAndroidRootPath()) {
@@ -1799,13 +1852,9 @@ void TWPartitionManager::UpdateSystemDetails(const bool defer_data_size,
   DataManager::SetValue(TW_BACKUP_DATA_SIZE, data_size);
   const std::string current_storage_path = DataManager::GetCurrentStoragePath();
   if (TWPartition* free_storage = FindPartitionByPath(current_storage_path)) {
-    // Attempt to mount storage
-    if (!free_storage->Mount(false)) {
-      gui_msg(Msg(msg::kWarning, "unable_to_mount_storage=Unable to mount storage"));
-      DataManager::SetValue(TW_STORAGE_FREE_SIZE, UnitConversion::FormatBytes(0));
-    } else {
-      DataManager::SetValue(TW_STORAGE_FREE_SIZE, UnitConversion::FormatBytes(free_storage->free_));
-    }
+    // A refresh only observes storage. Mount/decrypt requests own state changes.
+    DataManager::SetValue(TW_STORAGE_FREE_SIZE, UnitConversion::FormatBytes(
+        free_storage->IsMounted() ? free_storage->free_ : 0));
   } else {
     LOGINFO("Unable to find storage partition '%s'.\n", current_storage_path.c_str());
   }
@@ -1817,7 +1866,16 @@ void TWPartitionManager::UpdateSystemDetails(const bool defer_data_size,
 }
 
 void TWPartitionManager::ProcessAsyncDataSize() const {
+  // Leave results queued while storage is busy; never block the GUI.
+  std::unique_lock transaction(twrp_operation_executor::instance().mutex(), std::try_to_lock);
+  if (!transaction.owns_lock()) return;
   if (TWPartition* dat = FindPartitionByPath("/data")) dat->ApplyAsyncDataSize();
+}
+
+void TWPartitionManager::InvalidateAsyncDataSize() const {
+  // Serialize invalidation with result application and new scan requests.
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
+  TWPartition::StopDataSizeScan();
 }
 
 void TWPartitionManager::PostDecrypt(const std::string& block_device) const {
@@ -1956,6 +2014,7 @@ void TWPartitionManager::MarkUserDecrypted(int user_id) {
 }
 
 void TWPartitionManager::MarkDataLocked() {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
 #ifdef TW_INCLUDE_FBE
   // No DE keys were loaded, so the unmount took none.
   if (!DataManager::GetIntValue(TW_IS_FBE)) return;
@@ -2003,7 +2062,27 @@ void TWPartitionManager::CheckUsersDecryptionStatus() const {
 #endif
 }
 
+bool TWPartitionManager::PrepareDataForDe(const bool display_error) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
+  TWPartition* data = FindPartitionByPath("/data");
+  if (data == nullptr) {
+    LOGERR("Unable to locate /data for DE setup\n");
+    return false;
+  }
+  const bool was_mounted = data->IsMounted();
+  if (!MountByPath("/data", display_error)) return false;
+  if (!data->is_fbe_) return true;
+  if (data->DecryptFbeDe()) return true;
+
+  LOGERR("Unable to prepare DE storage on /data\n");
+  // Roll back only the mount created by this request.
+  if (!was_mounted && !UnmountByPath("/data", display_error))
+    LOGERR("Unable to roll back /data mount after DE setup failure\n");
+  return false;
+}
+
 int TWPartitionManager::DecryptDevice(const std::string& Password, const int user_id) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
 #ifdef TW_INCLUDE_CRYPTO
   // Mount any partitions that need to be mounted for decrypt
   for (TWPartition* partition : partitions_) {
@@ -2015,21 +2094,11 @@ int TWPartitionManager::DecryptDevice(const std::string& Password, const int use
 
   SetCryptoState();
 
-  if (DataManager::GetIntValue(TW_IS_FBE)) {
+  // is_fbe_ survives DE failure even when the UI flag has been cleared.
+  TWPartition* data = FindPartitionByPath("/data");
+  if (data != nullptr && data->is_fbe_) {
 #ifdef TW_INCLUDE_FBE
-    TWPartition* data = FindPartitionByPath("/data");
-    if (data == nullptr) {
-      LOGERR("Unable to locate /data for FBE decrypt\n");
-      return -1;
-    }
-    const bool data_was_mounted = data->IsMounted();
-    if (!MountByPath("/data", true)) return -1; // /data has to be mounted for FBE
-    // Unmounting /data drops the DE keys. Every decrypt entry point must restore
-    // them before gatekeeper files and CE policies can be read.
-    if (!data->RestoreDeKeys()) {
-      if (!data_was_mounted) UnmountByPath("/data", true);
-      return -1;
-    }
+    if (!PrepareDataForDe(true)) return -1;
 
     bool user_found = false;
     bool user_need_decrypt = false;
@@ -2390,6 +2459,7 @@ int TWPartitionManager::PartitionSdCard() const {
 
 void TWPartitionManager::GetPartitionList(const std::string& list_type,
                                           std::vector<PartitionList>* partition_list) const {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   if (list_type == "mount") {
     for (const TWPartition* partition : partitions_) {
       // SetupFileSystem() calls everything mountable, so ask whether
@@ -2509,6 +2579,7 @@ void TWPartitionManager::GetPartitionList(const std::string& list_type,
           .display_name = partition->backup_display_name_,
           .mount_point = partition->backup_path_,
           .selected = false,
+          .slot_select = partition->slot_select_,
         });
       }
     }
@@ -2534,6 +2605,54 @@ void TWPartitionManager::GetPartitionList(const std::string& list_type,
   } else {
     LOGERR("Unknown list type '%s' requested for TWPartitionManager::GetPartitionList\n",
            list_type.c_str());
+  }
+}
+
+bool TWPartitionManager::TryGetPartitionList(const std::string& list_type,
+                                             std::vector<PartitionList>* partition_list) const {
+  std::lock_guard lock(list_snapshot_mutex_);
+  list_subscriptions_.insert(list_type);
+  const auto found = list_snapshots_.find(list_type);
+  if (found == list_snapshots_.end()) {
+    partition_list->clear();
+    return false;
+  }
+  *partition_list = found->second;
+  return true;
+}
+
+uint64_t TWPartitionManager::PartitionListRevision(const std::string& list_type) const {
+  std::lock_guard lock(list_snapshot_mutex_);
+  const auto found = list_revisions_.find(list_type);
+  return found == list_revisions_.end() ? 0 : found->second;
+}
+
+void TWPartitionManager::InvalidatePartitionListSnapshot(const std::string& list_type) const {
+  // Caller holds the storage transaction to exclude publication of an old list.
+  std::lock_guard lock(list_snapshot_mutex_);
+  list_snapshots_.erase(list_type);
+  list_subscriptions_.insert(list_type);
+  ++list_revisions_[list_type];
+}
+
+void TWPartitionManager::RefreshPartitionListSnapshots() const {
+  // Refresh subscribed lists on the worker; retry later if storage is busy.
+  std::unique_lock transaction(twrp_operation_executor::instance().mutex(), std::try_to_lock);
+  if (!transaction.owns_lock()) return;
+  std::vector<std::string> requests;
+  {
+    std::lock_guard lock(list_snapshot_mutex_);
+    requests.assign(list_subscriptions_.begin(), list_subscriptions_.end());
+  }
+  for (const auto& type : requests) {
+    std::vector<PartitionList> fresh;
+    GetPartitionList(type, &fresh);
+    std::lock_guard lock(list_snapshot_mutex_);
+    const auto found = list_snapshots_.find(type);
+    if (found == list_snapshots_.end() || found->second != fresh) {
+      list_snapshots_[type] = std::move(fresh);
+      ++list_revisions_[type];
+    }
   }
 }
 
@@ -3057,6 +3176,7 @@ void TWPartitionManager::RemoveUeventDevices(const std::string& sysfs_path) {
 }
 
 void TWPartitionManager::HandleUevent(const UeventBlockData& uevent_data) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   for (TWPartition* partition : partitions_) {
     if (!partition->sysfs_entry_.empty()) {
       std::string device;
@@ -3084,6 +3204,9 @@ void TWPartitionManager::HandleUevent(const UeventBlockData& uevent_data) {
                 rmdir(child->mount_point_.c_str());
                 partitions_.erase(it);
                 delete child;
+                partition->has_sub_partition_ = std::ranges::any_of(partitions_, [&](const TWPartition* item) {
+                  return item->is_sub_partition_ && item->sub_partition_of_ == partition->mount_point_;
+                });
                 break;
               }
             }
@@ -3103,14 +3226,15 @@ void TWPartitionManager::HandleUevent(const UeventBlockData& uevent_data) {
           partition->primary_block_device_ = "";
           partition->actual_block_device_ = "";
           RemoveUeventDevices(partition->mount_point_);
+          partition->has_sub_partition_ = false;
           return;
         }
       }
     }
   }
 
-  if (!GetSuperStatus())
-    LOGINFO("Found no matching fstab entry for uevent device '%s' - %s\n",
+  // Unrelated block events must not query BootControl merely to suppress a log.
+  LOGINFO("Found no matching fstab entry for uevent device '%s' - %s\n",
           uevent_data.sysfs_path.c_str(),
           uevent_data.action.c_str());
 }
@@ -3175,23 +3299,90 @@ UeventBlockData TWPartitionManager::GetEventBlockValues(char* buf, const int len
   return ret;
 }
 
-void TWPartitionManager::ReadUevent() const {
-  // USB discovery emits many unrelated events. Drain a bounded batch so a
-  // partition is not delayed by one event per rendered frame.
+void TWPartitionManager::ResyncUeventDevices() {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
+  // Discover disks from sysfs, including a new disk name whose add was lost.
+  // Only fstab parents explicitly managed by uevent participate.
+  std::vector<std::pair<std::string, std::string>> disks;
+  std::error_code ec;
+  for (const auto& entry : fs::directory_iterator("/sys/block", ec)) {
+    const auto resolved = fs::canonical(entry.path(), ec);
+    if (ec) { ec.clear(); continue; }
+    auto path = resolved.string();
+    if (path.starts_with("/sys/")) path.erase(0, 4);
+    disks.emplace_back(path, (fs::path("/dev/block") / entry.path().filename()).string());
+  }
+  if (ec) return; // An unreadable sysfs view is not evidence of device removal.
+  std::vector<TWPartition*> parents;
+  for (TWPartition* part : partitions_)
+    if (part->removable_ && !part->is_sub_partition_ && !part->sysfs_entry_.empty())
+      parents.push_back(part);
+  for (TWPartition* parent : parents) {
+    const auto prefix = parent->sysfs_entry_.substr(0, parent->sysfs_entry_.find('*'));
+    std::vector<std::string> matches;
+    for (const auto& [path, block] : disks)
+      if (path.starts_with(prefix)) matches.push_back(block);
+    const bool current_present = std::ranges::find(matches, parent->primary_block_device_) != matches.end();
+    // Remove old children before discovery, even if a stale /dev node remains.
+    for (auto it = partitions_.begin(); it != partitions_.end();) {
+      TWPartition* child = *it;
+      if (child->is_sub_partition_ && child->sub_partition_of_ == parent->mount_point_ &&
+          (!current_present || !TWFunc::IsPathExists(child->primary_block_device_))) {
+        child->Unmount(false);
+        rmdir(child->mount_point_.c_str());
+        it = partitions_.erase(it);
+        delete child;
+      } else ++it;
+    }
+    parent->has_sub_partition_ = std::ranges::any_of(partitions_, [&](const TWPartition* child) {
+      return child->is_sub_partition_ && child->sub_partition_of_ == parent->mount_point_;
+    });
+    if (!current_present) {
+      parent->Unmount(false);
+      parent->primary_block_device_.clear();
+      parent->alternate_block_device_.clear();
+      parent->actual_block_device_.clear();
+      parent->is_present_ = false;
+    }
+    // Preserve HandleUevent's sysfs matching and wildcard discovery semantics.
+    for (const auto& block : matches) {
+      parent->primary_block_device_ = block;
+      parent->alternate_block_device_ = block;
+      parent->FindActualBlockDevice();
+    }
+  }
+}
+
+void TWPartitionManager::ReadUevent(bool force_resync) {
+  uevent_overrun_ |= force_resync;
+  bool drained = false;
   for (int count = 0; count < 64; ++count) {
     char buf[4096];
     const auto len = recv(uevent_pfd.fd, buf, sizeof(buf), MSG_DONTWAIT | MSG_TRUNC);
     if (len < 0) {
-      if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
-        LOGINFO("recv error on uevent: %s\n", strerror(errno));
-      return;
+      if (errno == ENOBUFS) {
+        uevent_overrun_ = true;
+        continue;
+      }
+      drained = errno == EAGAIN || errno == EWOULDBLOCK;
+      if (!drained && errno != EINTR) LOGINFO("recv error on uevent: %s\n", strerror(errno));
+      break;
     }
-    if (len == 0 || len >= static_cast<decltype(len)>(sizeof(buf))) continue;
-    const UeventBlockData uevent_data = GetEventBlockValues(buf, static_cast<int>(len));
-    if (uevent_data.subsystem == "block" &&
-        (uevent_data.type == "disk" || uevent_data.type == "partition")) {
-      PartitionManager.HandleUevent(uevent_data);
+    if (len == 0) { drained = true; break; }
+    if (len >= static_cast<decltype(len)>(sizeof(buf))) {
+      uevent_overrun_ = true;
+      continue;
     }
+    const UeventBlockData data = GetEventBlockValues(buf, static_cast<int>(len));
+    if (data.subsystem == "block" && (data.type == "disk" || data.type == "partition"))
+      HandleUevent(data);
+  }
+  // Coalesce overflow within a burst, but sustained input cannot postpone a
+  // correction forever: at most four bounded batches precede a resync.
+  if (uevent_overrun_ && (drained || ++uevent_dirty_batches_ >= 4)) {
+    uevent_overrun_ = false;
+    uevent_dirty_batches_ = 0;
+    ResyncUeventDevices();
   }
 }
 

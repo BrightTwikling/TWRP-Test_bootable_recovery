@@ -17,6 +17,7 @@
 #include "twinstall.h"
 #include "twrp_functions.hpp"
 #include "twrp_operation.h"
+#include "twrp_operation_executor.h"
 #include "variables.h"
 
 namespace gui2_backend {
@@ -113,6 +114,8 @@ bool twrp_install_backend::start_zip(const std::vector<std::string>& paths) {
 void twrp_install_backend::run_zip(std::vector<std::string> zip_queue) {
   int i, ret_val = 0, wipe_cache = 0;
   const int zip_queue_index = static_cast<int>(zip_queue.size());
+  // Stop old scans before the install changes /data.
+  PartitionManager.InvalidateAsyncDataSize();
   for (i = 0; i < zip_queue_index; i++) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -162,7 +165,8 @@ void twrp_install_backend::run_zip(std::vector<std::string> zip_queue) {
     PartitionManager.WipeByPath("/cache");
   }
 
-  PartitionManager.UpdateSystemDetails();
+  // Defer the size walk; installation itself has finished.
+  PartitionManager.UpdateSystemDetails(true);
   operation_end(ret_val);
   DataManager::SetValue(TW_ZIP_QUEUE_COUNT, 0);
 
@@ -177,14 +181,12 @@ void twrp_install_backend::run_zip(std::vector<std::string> zip_queue) {
 
 std::vector<image_target> twrp_install_backend::image_targets() {
   std::vector<PartitionList> list;
-  PartitionManager.GetPartitionList("flashimg", &list);
+  PartitionManager.TryGetPartitionList("flashimg", &list);
 
   std::vector<image_target> result;
   result.reserve(list.size());
   for (const PartitionList& entry : list) {
-    TWPartition* partition = PartitionManager.FindPartitionByPath(entry.mount_point);
-    result.push_back({ entry.display_name, entry.mount_point,
-                       partition != nullptr && partition->IsSlotSelect() });
+    result.push_back({ entry.display_name, entry.mount_point, entry.slot_select });
   }
   return result;
 }
@@ -207,7 +209,11 @@ std::string twrp_install_backend::image_target_for(const std::string& filename) 
   } else if (str_lower == "dtbo.img" || str_lower == "dtbo_a.img" || str_lower == "dtbo_b.img") {
     return "/dtbo";
   } else if (str_lower.find("kernelsu_patched_") == 0) {
-    if (PartitionManager.FindPartitionByPath("/init_boot") != nullptr) {
+    std::vector<PartitionList> targets;
+    if (!PartitionManager.TryGetPartitionList("flashimg", &targets)) return "";
+    if (std::any_of(targets.begin(), targets.end(), [](const PartitionList& target) {
+          return target.mount_point == "/init_boot";
+        })) {
       return "/init_boot";
     } else {
       return "/boot";

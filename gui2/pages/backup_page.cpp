@@ -69,6 +69,29 @@ lv_obj_t* create_input(lv_obj_t* parent, const gui2_core::ui_metrics& metrics, b
 
 }  // namespace
 
+void refresh_backup_partitions(const backup_page_view& view,
+                               const backup_page_options& options) {
+  if (view.partitions_pane == nullptr || options.metrics == nullptr || options.strings == nullptr)
+    return;
+  const auto& metrics = *options.metrics;
+  const auto& strings = *options.strings;
+  lv_obj_clean(view.partitions_pane);
+  if (options.targets != nullptr && options.selected != nullptr &&
+      options.target_indices != nullptr) {
+    for (size_t i = 0; i < options.target_count; ++i) {
+      gui2_components::create_check_row(
+          view.partitions_pane, metrics, options.targets[i].name.c_str(), options.selected[i],
+          options.selection_callback,
+          const_cast<void*>(static_cast<const void*>(&options.target_indices[i])));
+    }
+  }
+  if (options.select_storage_callback != nullptr || options.refresh_sizes_callback != nullptr)
+    gui2_components::create_flat_button_row(
+        view.partitions_pane, metrics, strings.select_storage_title,
+        options.select_storage_callback, strings.refresh_sizes_button,
+        options.refresh_sizes_callback, options.press_guard_callback);
+}
+
 backup_page_view build_backup_page(const backup_page_options& options) {
   backup_page_view view;
   if (options.content == nullptr || options.metrics == nullptr || options.strings == nullptr)
@@ -86,20 +109,7 @@ backup_page_view build_backup_page(const backup_page_options& options) {
   }
 
   view.partitions_pane = create_column(view.body, metrics);
-  if (options.targets != nullptr && options.selected != nullptr &&
-      options.target_indices != nullptr) {
-    for (size_t i = 0; i < options.target_count; ++i) {
-      gui2_components::create_check_row(
-          view.partitions_pane, metrics, options.targets[i].name.c_str(), options.selected[i],
-          options.selection_callback,
-          const_cast<void*>(static_cast<const void*>(&options.target_indices[i])));
-    }
-  }
-  if (options.select_storage_callback != nullptr || options.refresh_sizes_callback != nullptr)
-    gui2_components::create_flat_button_row(
-        view.partitions_pane, metrics, strings.select_storage_title,
-        options.select_storage_callback, strings.refresh_sizes_button,
-        options.refresh_sizes_callback, options.press_guard_callback);
+  refresh_backup_partitions(view, options);
 
   view.options_pane = create_column(view.body, metrics);
 

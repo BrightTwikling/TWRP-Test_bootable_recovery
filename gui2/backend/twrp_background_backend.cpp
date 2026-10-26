@@ -1,12 +1,15 @@
 #include "twrp_background_backend.h"
 
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -127,15 +130,73 @@ void ors_command_read() {
 }  // namespace
 
 twrp_background_backend::~twrp_background_backend() {
+  stop();
   if (command_thread.joinable()) command_thread.join();
 }
 
 // gui_start: runPages clears tw_page_done, which the pages of startup leave
 // set, and the listener comes up.
 void twrp_background_backend::start() {
-  std::lock_guard<std::mutex> lock(ors_mutex);
-  DataManager::SetValue("tw_page_done", 0);
-  setup_ors_command();
+  if (uevent_thread_.joinable()) return;
+  {
+    std::lock_guard<std::mutex> lock(ors_mutex);
+    DataManager::SetValue("tw_page_done", 0);
+    if (orsout == nullptr) {
+      if (ors_read_fd >= 0) close(ors_read_fd);
+      setup_ors_command();
+    }
+  }
+  uevent_stop_.store(false);
+  uevent_thread_ = std::thread(&twrp_background_backend::uevent_loop, this);
+}
+
+void twrp_background_backend::stop() {
+  // Join without holding the storage transaction or command lock.
+  if (!uevent_thread_.joinable()) return;
+  uevent_stop_.store(true);
+  uevent_thread_.join();
+}
+
+void twrp_background_backend::uevent_loop() {
+  auto next_snapshot = std::chrono::steady_clock::now();
+  bool listen_uevent = true;
+  while (!uevent_stop_.load()) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= next_snapshot) {
+      PartitionManager.RefreshPartitionListSnapshots();
+      next_snapshot = now + std::chrono::milliseconds(250);
+    }
+    pollfd uevent = { .fd = listen_uevent ? PartitionManager.uevent_pfd.fd : -1,
+                      .events = POLLIN, .revents = 0 };
+    // The timeout is what bounds how long stop() waits on an idle device.
+    const int ready = ::poll(&uevent, 1, 20);
+    if (uevent_stop_.load()) break;
+    if (ready < 0) {
+      if (errno == EBADF || errno == EINVAL) {
+        LOGINFO("uevent socket closed, disabling hotplug polling\n");
+        listen_uevent = false;
+        continue;
+      }
+      // Do not spin on an error the socket keeps reporting.
+      if (errno != EINTR) usleep(10000);
+      continue;
+    }
+    if (ready == 0) continue;
+    // Drain POLLERR too, so ReadUevent can detect overflow and resync.
+    if (uevent.revents & (POLLIN | POLLERR | POLLHUP))
+      PartitionManager.ReadUevent((uevent.revents & POLLERR) != 0);
+    if (uevent.revents & (POLLNVAL | POLLHUP)) {
+      LOGINFO("uevent socket is not open, disabling hotplug polling\n");
+      listen_uevent = false;
+      continue;
+    }
+    // Avoid spinning on a persistent error with nothing left to drain.
+    if (!(uevent.revents & POLLIN) && (uevent.revents & POLLERR)) usleep(1000);
+  }
+}
+
+uint64_t twrp_background_backend::partition_list_revision(const std::string& type) {
+  return PartitionManager.PartitionListRevision(type);
 }
 
 // One pass of runPages' loop body, minus drawing and input.
@@ -144,26 +205,19 @@ void twrp_background_backend::poll() {
   PartitionManager.ProcessAsyncDataSize();
 
   std::lock_guard<std::mutex> lock(ors_mutex);
+  // orsout is non-NULL while a command is still running; a negative fd means the
+  // listener never came up.
+  if (ors_read_fd < 0 || orsout) return;
+
   fd_set fdset;
   FD_ZERO(&fdset);
-  int select_fd = 0;
-  if (PartitionManager.uevent_pfd.fd > 0) {
-    FD_SET(PartitionManager.uevent_pfd.fd, &fdset);
-    select_fd = std::max(select_fd, PartitionManager.uevent_pfd.fd + 1);
-  }
-  if (ors_read_fd > 0 && !orsout) {  // orsout is non-NULL if a command is still running
-    FD_SET(ors_read_fd, &fdset);
-    select_fd = std::max(select_fd, ors_read_fd + 1);
-  }
-  if (select_fd == 0) return;
+  FD_SET(ors_read_fd, &fdset);
 
   timeval timeout;
   timeout.tv_sec = 0;
   timeout.tv_usec = 1;
-  if (select(select_fd, &fdset, NULL, NULL, &timeout) <= 0) return;
-  if (PartitionManager.uevent_pfd.fd > 0 && FD_ISSET(PartitionManager.uevent_pfd.fd, &fdset))
-    PartitionManager.ReadUevent();
-  if (ors_read_fd > 0 && !orsout && FD_ISSET(ors_read_fd, &fdset)) ors_command_read();
+  if (select(ors_read_fd + 1, &fdset, NULL, NULL, &timeout) <= 0) return;
+  if (FD_ISSET(ors_read_fd, &fdset)) ors_command_read();
 }
 
 bool twrp_background_backend::command_running() {

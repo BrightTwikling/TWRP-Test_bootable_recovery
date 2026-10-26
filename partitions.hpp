@@ -24,6 +24,8 @@
 #include <atomic>
 #include <filesystem>
 #include <map>
+#include <mutex>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -61,6 +63,8 @@ struct PartitionList {
   std::string display_name;
   std::string mount_point;
   bool selected;
+  bool slot_select = false;
+  bool operator==(const PartitionList&) const = default;
 };
 
 struct UeventBlockData {
@@ -183,7 +187,7 @@ class TWPartition {
 public:
   TWPartition();
 
-  virtual ~TWPartition() = default;
+  virtual ~TWPartition();
 
   // Checks mount to see if the partition is currently mounted
   [[nodiscard]] bool IsMounted() const;
@@ -254,7 +258,9 @@ public:
   // Checks the filesystem type using blkid
   void CheckFsType();
 
-  bool UpdateSize(bool display_error, bool defer_folder_size = false);
+  // Capacity refreshes can inspect mounted filesystems without changing mounts.
+  bool UpdateSize(bool display_error, bool defer_folder_size = false,
+                  bool allow_mount = true);
 
   // Updates size information, defer_folder_size leaves the data/media walk to UpdateDataSizeAsync()
   // Starts a deferred data/media size scan
@@ -262,6 +268,9 @@ public:
 
   // Applies a completed scan on the caller thread
   void ApplyAsyncDataSize();
+
+  // Cancels scans and waits for all workers; never call from the GUI thread.
+  static void StopDataSizeScan();
 
   // True while user 0's CE storage is still locked
   [[nodiscard]] static bool DataIsLocked();
@@ -336,9 +345,12 @@ protected:
   void SetBlockDevice(const std::string& block_device);
 
 private:
+  bool MountFilesystem(bool display_error);
+
   // Processes a fstab line
   bool ProcessFstabLine(const char* fstab_line, bool display_error,
-                        std::map<std::string, FlagsMap>* twrp_flags);
+                        std::map<std::string, FlagsMap>* twrp_flags,
+                        TWPartition* additional_entry = nullptr);
 
   // Overrides block devices from the twrp.flags file
   void OverrideBlockDevicesFromFlags(int fstab_version, bool display_error,
@@ -540,8 +552,9 @@ private:
   bool is_decrypted_;
   // File Based Encryption is present
   bool is_fbe_;
-  // Existing device/DE keys installed on this mount
-  bool de_keys_ready_ = false;
+  enum class DeState { UNINITIALIZED, FAILED, READY, NEEDS_RESTORE };
+  // Unmount changes READY to NEEDS_RESTORE; FAILED requires full initialization.
+  DeState de_state_ = DeState::UNINITIALIZED;
   bool RestoreDeKeys();
   bool mount_to_decrypt_;
   // Mount this partition during decrypt (/vendor, /firmware, etc in case we need proprietary libs or firmware files)
@@ -640,7 +653,7 @@ public:
   int ProcessFstab(std::string fstab_filename, bool display_error, bool recovery_mode);
 
   // Populates the partitions
-  void SetupFstabPartitions(bool display_error);
+  bool SetupFstabPartitions(bool display_error);
 
   // Creates /etc/fstab file that's used by the command line for mount commands
   int WriteFstab() const;
@@ -729,6 +742,13 @@ public:
   // Applies a completed background data-size calculation
   void ProcessAsyncDataSize() const;
 
+  // Cancels and joins scans before modifying /data; background threads only.
+  void InvalidateAsyncDataSize() const;
+
+  // Explicit content access: mount /data, then initialize or restore its DE keys.
+  // Ordinary MountByPath callers retain filesystem-only semantics.
+  bool PrepareDataForDe(bool display_error);
+
   // Attempt to decrypt any encrypted partitions
   int DecryptDevice(const std::string& Password, int user_id = 0);
 
@@ -772,6 +792,14 @@ public:
 
   void GetPartitionList(const std::string& list_type,
                         std::vector<PartitionList>* partition_list) const;
+
+  // GUI readers only copy published values and request a background refresh.
+  // False means the first snapshot is still pending; no storage lock or I/O.
+  bool TryGetPartitionList(const std::string& list_type,
+                           std::vector<PartitionList>* partition_list) const;
+  void RefreshPartitionListSnapshots() const;
+  uint64_t PartitionListRevision(const std::string& list_type) const;
+  void InvalidatePartitionListSnapshot(const std::string& list_type) const;
 
   // Indicates if the fstab has been processed or not
   [[nodiscard]] bool FstabProcessed() const;
@@ -860,11 +888,13 @@ public:
 
   static UeventBlockData GetEventBlockValues(char* buf, int len);
 
-  // Scans the buffer from uevent data and loads the appropriate data into a UeventBlockData struct for processing
-  // Reads uevent data into a buffer
-  void ReadUevent() const;
+  // Drains hotplug events; GUI2 calls this from its storage worker.
+  void ReadUevent(bool force_resync = false);
 
-  // Closes the uevent netlink socket
+  // Reconciles removable devices with sysfs after dropped hotplug events.
+  void ResyncUeventDevices();
+
+  // Close only after the hotplug worker stops; GUI2 hands this socket to the legacy GUI.
   void CloseUevent();
 
   // Adds a new partition to the partitions_ vector
@@ -978,6 +1008,15 @@ private:
 
   // Vector list of all partitions
   std::vector<TWPartition*> partitions_;
+  // Published copies of the GUI lists. Built while the storage transaction is
+  // held; the lock is a leaf, never taken before the transaction.
+  mutable std::mutex list_snapshot_mutex_;
+  mutable std::map<std::string, std::vector<PartitionList>> list_snapshots_;
+  mutable std::map<std::string, uint64_t> list_revisions_;
+  mutable std::set<std::string> list_subscriptions_;
+  // Set when the netlink queue dropped an event: removable children may be stale.
+  bool uevent_overrun_ = false;
+  unsigned uevent_dirty_batches_ = 0;
   // Current Active Slot (A or B) for display purposes
   std::string active_slot_display_;
   // List of FBE users

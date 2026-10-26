@@ -13,6 +13,7 @@
 #include "twrp_functions.hpp"
 #include "twrp_file_list.h"
 #include "twrp_operation.h"
+#include "twrp_operation_executor.h"
 #include "variables.h"
 
 namespace gui2_backend {
@@ -91,22 +92,27 @@ std::vector<restore_backup> twrp_restore_backend::backups() {
 bool twrp_restore_backend::open(const std::string& path) {
   if (running_.load() || path.empty()) return false;
 
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
+  PartitionManager.InvalidatePartitionListSnapshot("restore");
+  // An unreadable folder must not retain the previous backup's targets.
+  DataManager::SetValue("tw_restore_list", "");
+  opened_.clear();
   DataManager::SetValue("tw_restore", path);
   std::string Restore_Name;
   DataManager::GetValue("tw_restore", Restore_Name);
   PartitionManager.SetRestoreFiles(Restore_Name);
-  opened_ = path;
-
   std::string list;
   DataManager::GetValue("tw_restore_list", list);
-  return !list.empty();
+  if (list.empty()) return false;
+  opened_ = path;
+  return true;
 }
 
 std::vector<restore_target> twrp_restore_backend::targets() {
   if (opened_.empty()) return {};
 
   std::vector<PartitionList> list;
-  PartitionManager.GetPartitionList("restore", &list);
+  PartitionManager.TryGetPartitionList("restore", &list);
 
   std::vector<restore_target> result;
   result.reserve(list.size());

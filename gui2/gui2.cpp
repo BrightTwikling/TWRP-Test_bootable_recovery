@@ -1,3 +1,4 @@
+#include <map>
 #include <time.h>
 #include <unistd.h>
 
@@ -271,6 +272,10 @@ static void refresh_install_progress(void);
 static void keyboard_feedback_cb(void*);
 static void show_general_settings_page(page_transition transition);
 static void show_keyboard_settings_page(page_transition transition);
+// Preserve choices by path across snapshot updates.
+static bool refreshing_partition_list = false;
+static std::map<std::string, bool> refreshing_partition_choices;
+
 static void show_wipe_page(page_transition transition);
 static void show_advanced_wipe_page(page_transition transition);
 static void show_format_data_page(page_transition transition);
@@ -3723,6 +3728,9 @@ static void show_advanced_wipe_page(page_transition transition) {
 
   wipe_targets = wipe == nullptr ? std::vector<gui2_backend::wipe_target>() : wipe->targets();
   for (bool& selected : page_state.wipe_selected) selected = false;
+  if (refreshing_partition_list)
+    for (size_t i = 0; i < wipe_targets.size() && i < std::size(page_state.wipe_selected); ++i)
+      page_state.wipe_selected[i] = refreshing_partition_choices[wipe_targets[i].mount_point];
   page_state.wipe_target_count = std::min(wipe_targets.size(), std::size(page_state.wipe_selected));
 
   gui2_pages::advanced_wipe_page_options options;
@@ -4189,12 +4197,7 @@ static void mount_event_cb(lv_event_t* event) {
   lv_timer_set_repeat_count(timer, 1);
 }
 
-static void show_backup_page(page_transition transition) {
-  const int track_height = gui2_pages::wipe_track_height();
-  const int bottom_reserved = ui.nav_height + track_height + ui.cards_top_gap * 2;
-  create_page_scaffold(page_kind::BACKUP, false, strings().backup_title, "",
-                       bottom_reserved, transition);
-
+static gui2_pages::backup_page_options backup_partition_options() {
   backup_targets = backup == nullptr ? std::vector<gui2_backend::backup_target>()
                                      : backup->targets();
   page_state.backup_target_count =
@@ -4205,6 +4208,31 @@ static void show_backup_page(page_transition transition) {
   for (size_t i = 0; i < page_state.backup_target_count; ++i)
     page_state.backup_selected[i] =
         (";" + selected_list).find(";" + backup_targets[i].mount_point + ";") != std::string::npos;
+  if (refreshing_partition_list)
+    for (size_t i = 0; i < page_state.backup_target_count; ++i) {
+      const auto found = refreshing_partition_choices.find(backup_targets[i].mount_point);
+      if (found != refreshing_partition_choices.end()) page_state.backup_selected[i] = found->second;
+    }
+  gui2_pages::backup_page_options options;
+  options.metrics = &ui;
+  options.strings = &strings();
+  options.targets = backup_targets.data();
+  options.target_count = page_state.backup_target_count;
+  options.selected = page_state.backup_selected;
+  options.target_indices = row_indices(std::size(page_state.wipe_selected));
+  options.selection_callback = backup_selection_event_cb;
+  options.select_storage_callback = backup_select_storage_cb;
+  options.refresh_sizes_callback = backup_refresh_sizes_cb;
+  options.press_guard_callback = press_cancel_guard_cb;
+  return options;
+}
+
+static void show_backup_page(page_transition transition) {
+  const int track_height = gui2_pages::wipe_track_height();
+  const int bottom_reserved = ui.nav_height + track_height + ui.cards_top_gap * 2;
+  create_page_scaffold(page_kind::BACKUP, false, strings().backup_title, "",
+                       bottom_reserved, transition);
+
   if (page_state.backup_name.empty() && settings != nullptr) {
     const std::string name = settings->get_string("tw_backup_name", kAutoBackupName);
     if (name != kAutoBackupName) page_state.backup_name = name;
@@ -4220,20 +4248,10 @@ static void show_backup_page(page_transition transition) {
   if (action_body == nullptr) return;
   add_backup_tips(action_body, false);
 
-  gui2_pages::backup_page_options options;
+  auto options = backup_partition_options();
   options.content = action_body;
   options.page_layer = page_layer;
   options.overlay_layer = lv_layer_top();
-  options.metrics = &ui;
-  options.strings = &strings();
-  options.targets = backup_targets.data();
-  options.target_count = page_state.backup_target_count;
-  options.selected = page_state.backup_selected;
-  options.target_indices = row_indices(std::size(page_state.wipe_selected));
-  options.selection_callback = backup_selection_event_cb;
-  options.select_storage_callback = backup_select_storage_cb;
-  options.refresh_sizes_callback = backup_refresh_sizes_cb;
-  options.press_guard_callback = press_cancel_guard_cb;
   options.name = page_state.backup_name.c_str();
   options.name_focus_callback = backup_name_focus_cb;
   options.append_date_callback = backup_append_date_cb;
@@ -4444,21 +4462,17 @@ static void show_restore_list_page(page_transition transition) {
   gui2_pages::build_restore_list_page(options);
 }
 
-static void show_restore_page(page_transition transition) {
-  const int track_height = gui2_pages::wipe_track_height();
-  const int bottom_reserved = ui.nav_height + track_height + ui.cards_top_gap * 2;
-  create_page_scaffold(page_kind::RESTORE, false, strings().restore_title,
-                       page_state.restore_name.c_str(), bottom_reserved, transition);
-
+static gui2_pages::restore_page_options restore_partition_options() {
   restore_targets = restore == nullptr ? std::vector<gui2_backend::restore_target>()
                                        : restore->targets();
   page_state.restore_target_count =
       std::min(restore_targets.size(), std::size(page_state.restore_selected));
-
+  if (refreshing_partition_list)
+    for (size_t i = 0; i < page_state.restore_target_count; ++i) {
+      const auto found = refreshing_partition_choices.find(restore_targets[i].mount_point);
+      page_state.restore_selected[i] = found == refreshing_partition_choices.end() || found->second;
+    }
   gui2_pages::restore_page_options options;
-  options.content = main_content;
-  options.page_layer = page_layer;
-  options.overlay_layer = lv_layer_top();
   options.metrics = &ui;
   options.strings = &strings();
   options.targets = restore_targets.data();
@@ -4466,6 +4480,19 @@ static void show_restore_page(page_transition transition) {
   options.selected = page_state.restore_selected;
   options.target_indices = row_indices(std::size(page_state.wipe_selected));
   options.selection_callback = restore_selection_event_cb;
+  return options;
+}
+
+static void show_restore_page(page_transition transition) {
+  const int track_height = gui2_pages::wipe_track_height();
+  const int bottom_reserved = ui.nav_height + track_height + ui.cards_top_gap * 2;
+  create_page_scaffold(page_kind::RESTORE, false, strings().restore_title,
+                       page_state.restore_name.c_str(), bottom_reserved, transition);
+
+  auto options = restore_partition_options();
+  options.content = main_content;
+  options.page_layer = page_layer;
+  options.overlay_layer = lv_layer_top();
   options.check_digest = settings != nullptr && settings->get_int("tw_skip_digest_check", 0) != 0;
   options.check_digest_target = &kRestoreSkipDigestTarget;
   options.wrong_password = page_state.restore_wrong_password;
@@ -6111,6 +6138,8 @@ static void show_system_read_only_page(page_transition transition) {
 }
 
 static void shutdown_gui2(bool keep_display = false) {
+  // Join the hotplug worker before handing the socket to the legacy GUI.
+  if (background != nullptr) background->stop();
   flush_hardware_settings();
   if (hardware != nullptr) {
     hardware->stop_brightness();
@@ -6157,6 +6186,58 @@ static bool gui2_loop_should_exit(void*) {
   return switch_to_legacy || reboot_requested || startup_failed;
 }
 
+static void refresh_partition_list() {
+  if (background == nullptr) return;
+  const auto page = page_router.current();
+  const char* list_type = nullptr;
+  switch (page) {
+    case page_kind::BACKUP: list_type = "backup"; break;
+    case page_kind::RESTORE: list_type = "restore"; break;
+    case page_kind::ADVANCED_WIPE: list_type = "wipe"; break;
+    case page_kind::INSTALL_CONFIRM:
+      if (page_state.install_image) list_type = "flashimg";
+      break;
+    default: break;
+  }
+  if (list_type == nullptr) return;
+
+  static std::map<std::string, uint64_t> shown_revisions;
+  const uint64_t revision = background->partition_list_revision(list_type);
+  auto& shown = shown_revisions[list_type];
+  if (revision == shown) return;
+  shown = revision;
+
+  refreshing_partition_choices.clear();
+  const auto save_choices = [](const auto& targets, const auto& selected) {
+    for (size_t i = 0; i < targets.size() && i < std::size(selected); ++i)
+      refreshing_partition_choices[targets[i].mount_point] = selected[i];
+  };
+  switch (page) {
+    case page_kind::BACKUP: save_choices(backup_targets, page_state.backup_selected); break;
+    case page_kind::RESTORE: save_choices(restore_targets, page_state.restore_selected); break;
+    case page_kind::ADVANCED_WIPE: save_choices(wipe_targets, page_state.wipe_selected); break;
+    case page_kind::INSTALL_CONFIRM:
+      if (install != nullptr && page_state.install_target_mount.empty())
+        page_state.install_target_mount = install->image_target_for(install_file_text);
+      break;
+    default: break;
+  }
+
+  const int scroll = main_content == nullptr ? 0 : lv_obj_get_scroll_y(main_content);
+  refreshing_partition_list = true;
+  // Keep text inputs and the keyboard alive when refreshing backup/restore rows.
+  if (page == page_kind::BACKUP)
+    gui2_pages::refresh_backup_partitions(page_state.backup_view, backup_partition_options());
+  else if (page == page_kind::RESTORE)
+    gui2_pages::refresh_restore_partitions(page_state.restore_view, restore_partition_options());
+  else
+    navigate_to(page, nullptr, page_transition::REPLACE);
+  if (page == page_kind::BACKUP || page == page_kind::RESTORE) page_host.settle();
+  refreshing_partition_list = false;
+  lv_obj_update_layout(main_content);
+  lv_obj_scroll_to_y(main_content, scroll, LV_ANIM_OFF);
+}
+
 static void gui2_loop_tick(void*, uint64_t now_ms) {
   poll_startup(now_ms);
   if (splash_dismiss_pending && gui2_shell::splash_intro_finished()) {
@@ -6175,6 +6256,7 @@ static void gui2_loop_tick(void*, uint64_t now_ms) {
   // The legacy page loop runs whenever a page is up, which during startup is
   // only while it waits on one.
   if (background != nullptr) background->poll();
+  refresh_partition_list();
   const auto storage_page = page_router.current();
   if (!mount_pending && !mount_feedback.empty() &&
       lv_tick_elaps(mount_feedback_finished_ms) >= 3000) {

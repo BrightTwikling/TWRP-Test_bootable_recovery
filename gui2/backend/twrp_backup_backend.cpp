@@ -20,7 +20,7 @@ twrp_backup_backend::~twrp_backup_backend() {
 
 std::vector<backup_target> twrp_backup_backend::targets() {
   std::vector<PartitionList> list;
-  PartitionManager.GetPartitionList("backup", &list);
+  PartitionManager.TryGetPartitionList("backup", &list);
 
   std::vector<backup_target> result;
   result.reserve(list.size());

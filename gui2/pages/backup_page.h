@@ -80,6 +80,11 @@ struct backup_page_view {
 
 backup_page_view build_backup_page(const backup_page_options& options);
 
+// Refresh only the partition rows: automatic snapshot updates must leave the
+// options, textareas and keyboard (including its editing target) alive.
+void refresh_backup_partitions(const backup_page_view& view,
+                               const backup_page_options& options);
+
 // Shows which pane the freshly selected tab owns.
 void show_backup_tab(const backup_page_view& view, size_t index);
 

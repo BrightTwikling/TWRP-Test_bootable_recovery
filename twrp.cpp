@@ -190,20 +190,9 @@ static void DecryptPage(bool SkipDecryption, bool datamedia, startup_hooks* hook
 	}
 }
 
-static void ProcessRecoveryMode(const bool skip_decryption, startup_hooks* hooks) {
-  hooks->step(gui2_backend::startup_step::SYSTEM);
-  const int crash_counter = std::stoi(android::base::GetProperty("twrp.crash_counter", "-1")) + 1;
-  android::base::SetProperty("twrp.crash_counter", std::to_string(crash_counter));
-
-  if (crash_counter == 0) {
-    property_list([](const char* key, const char* value, void*) {
-      printf("%s=%s\n", key, value);
-    }, nullptr);
-    printf("\n");
-  } else {
-    printf("twrp.crash_counter=%d\n", crash_counter);
-  }
-
+// Finish all property reads that temporarily mount stock system/vendor before
+// init may start services backed by the recovery payload.
+static void PrepareRecoveryProperties() {
   // We are doing this here to allow super partition to be set up prior to overriding properties
 #if defined(TW_INCLUDE_LIBRESETPROP)
   for (const std::string& prop : std::initializer_list<std::string>{
@@ -282,6 +271,21 @@ static void ProcessRecoveryMode(const bool skip_decryption, startup_hooks* hooks
   }
 #endif // defined(TW_OVERRIDE_SYSTEM_PROPS)
 #endif // defined(TW_INCLUDE_LIBRESETPROP)
+}
+
+static void ProcessRecoveryMode(const bool skip_decryption, startup_hooks* hooks) {
+  hooks->step(gui2_backend::startup_step::SYSTEM);
+  const int crash_counter = std::stoi(android::base::GetProperty("twrp.crash_counter", "-1")) + 1;
+  android::base::SetProperty("twrp.crash_counter", std::to_string(crash_counter));
+
+  if (crash_counter == 0) {
+    property_list([](const char* key, const char* value, void*) {
+      printf("%s=%s\n", key, value);
+    }, nullptr);
+    printf("\n");
+  } else {
+    printf("twrp.crash_counter=%d\n", crash_counter);
+  }
 
   hooks->step(gui2_backend::startup_step::SCRIPTS);
   // Check for and run startup script if script exists
@@ -385,7 +389,8 @@ static bool run_early_startup(startup_hooks* hooks) {
 	}
 
 	hooks->step(gui2_backend::startup_step::STORAGE);
-	PartitionManager.SetupFstabPartitions(true);
+	PrepareRecoveryProperties();
+	if (!PartitionManager.SetupFstabPartitions(true)) return false;
 
 	hooks->step(gui2_backend::startup_step::SETTINGS);
 	DataManager::ReadSettingsFile();
@@ -425,7 +430,8 @@ static bool run_fastboot_startup(startup_hooks* hooks) {
 
 	hooks->step(gui2_backend::startup_step::SCRIPTS);
 	ProcessFastbootdMode();
-	return true;
+	// Release payload services after fastboot has unmapped logical partitions.
+	return android::base::SetProperty("twrp.storage.ready", "1");
 }
 
 // Runs the recovery-mode startup on its own thread while gui2 shows the splash.

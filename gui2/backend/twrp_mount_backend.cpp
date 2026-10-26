@@ -13,6 +13,7 @@
 #include "twcommon.h"
 #include "twrp_functions.hpp"
 #include "twrp_operation.h"
+#include "twrp_operation_executor.h"
 #include "variables.h"
 
 namespace gui2_backend {
@@ -63,10 +64,10 @@ int mountsystemtoggle(const std::string& arg) {
   return op_status;
 }
 
-static std::string otg_name(const std::string& path) {
+// The numbering of an OTG target is read out of the mount list the caller just
+// built, so one page build does not re-snapshot the list for every entry.
+static std::string otg_name(const std::string& path, const std::vector<PartitionList>& list) {
   if (!is_otg_path(path)) return {};
-  std::vector<PartitionList> list;
-  PartitionManager.GetPartitionList("mount", &list);
   std::vector<std::string> paths;
   for (const auto& item : list)
     if (is_otg_path(item.mount_point)) paths.push_back(item.mount_point);
@@ -79,29 +80,28 @@ static std::string otg_name(const std::string& path) {
 
 std::vector<mount_target> twrp_mount_backend::targets() {
   std::vector<PartitionList> list;
-  PartitionManager.GetPartitionList("mount", &list);
+  PartitionManager.TryGetPartitionList("mount", &list);
 
   std::vector<mount_target> result;
   result.reserve(list.size());
   for (const PartitionList& entry : list)
-    result.push_back({ is_otg_path(entry.mount_point) ? otg_name(entry.mount_point) : entry.display_name,
-                       entry.mount_point, entry.selected });
+    result.push_back({ is_otg_path(entry.mount_point) ? otg_name(entry.mount_point, list) :
+                       entry.display_name, entry.mount_point, entry.selected });
   return result;
 }
 
 // GUIPartitionList::NotifySelect for the "mount" list.
 bool twrp_mount_backend::set_mounted(const std::string& mount_point, bool mounted) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   if (mounted) {
-    if (!PartitionManager.MountByPath(mount_point, true)) return false;
     if (mount_point == "/data") {
+      if (!PartitionManager.PrepareDataForDe(true)) return false;
       TWPartition* data = PartitionManager.FindPartitionByPath(mount_point);
       if (data == nullptr) return false;
-      // Restore DE keys only for an explicit Data mount; CE uses the decrypt page.
-      if (!data->RestoreDeKeys()) {
-        data->Unmount(true);
-        return false;
-      }
+      // DE preparation does not unlock a user's CE storage.
       if (data->is_fbe_ && TWPartition::DataIsLocked()) return true;
+    } else if (!PartitionManager.MountByPath(mount_point, true)) {
+      return false;
     }
     PartitionManager.AddMtpStorage(mount_point);
     return true;
@@ -145,13 +145,13 @@ bool twrp_mount_backend::system_needs_warning() {
 
 std::vector<storage_device> twrp_mount_backend::storages() {
   std::vector<PartitionList> list;
-  PartitionManager.GetPartitionList("storage", &list);
+  PartitionManager.TryGetPartitionList("storage", &list);
 
   std::vector<storage_device> result;
   result.reserve(list.size());
   for (const PartitionList& entry : list)
-    result.push_back({ is_otg_path(entry.mount_point) ? otg_name(entry.mount_point) : entry.display_name,
-                       entry.mount_point, entry.selected });
+    result.push_back({ is_otg_path(entry.mount_point) ? otg_name(entry.mount_point, list) :
+                       entry.display_name, entry.mount_point, entry.selected });
   return result;
 }
 
@@ -159,6 +159,8 @@ std::vector<storage_device> twrp_mount_backend::storages() {
 // tw_storage_path; that is what recomputes the backup folder, the display name
 // and the free size.
 bool twrp_mount_backend::select_storage(const std::string& path) {
+  // Keep the target alive across lookup, mount and size refresh.
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   TWPartition* Part = PartitionManager.FindPartitionByPath(path);
   if (Part == nullptr) {
     LOGERR("Unable to locate partition for '%s'\n", path.c_str());
@@ -174,8 +176,10 @@ bool twrp_mount_backend::select_storage(const std::string& path) {
 std::string twrp_mount_backend::storage_name() {
   std::string value;
   DataManager::GetValue("tw_storage_display_name", value);
-  return is_otg_path(DataManager::GetCurrentStoragePath()) ?
-      otg_name(DataManager::GetCurrentStoragePath()) : value;
+  if (!is_otg_path(DataManager::GetCurrentStoragePath())) return value;
+  std::vector<PartitionList> list;
+  PartitionManager.TryGetPartitionList("mount", &list);
+  return otg_name(DataManager::GetCurrentStoragePath(), list);
 }
 
 std::string twrp_mount_backend::storage_free() {

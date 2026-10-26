@@ -68,6 +68,23 @@ void build_restore_list_page(const restore_list_page_options& options) {
                                         options.press_guard_callback);
 }
 
+void refresh_restore_partitions(const restore_page_view& view,
+                                const restore_page_options& options) {
+  if (view.partitions_pane == nullptr || options.metrics == nullptr || options.strings == nullptr)
+    return;
+  const auto& metrics = *options.metrics;
+  lv_obj_clean(view.partitions_pane);
+  if (options.targets != nullptr && options.selected != nullptr &&
+      options.target_indices != nullptr) {
+    for (size_t i = 0; i < options.target_count; ++i) {
+      gui2_components::create_check_row(
+          view.partitions_pane, metrics, options.targets[i].name.c_str(), options.selected[i],
+          options.selection_callback,
+          const_cast<void*>(static_cast<const void*>(&options.target_indices[i])));
+    }
+  }
+}
+
 restore_page_view build_restore_page(const restore_page_options& options) {
   restore_page_view view;
   if (options.content == nullptr || options.metrics == nullptr || options.strings == nullptr)
@@ -85,15 +102,7 @@ restore_page_view build_restore_page(const restore_page_options& options) {
   }
 
   view.partitions_pane = create_column(view.body, metrics);
-  if (options.targets != nullptr && options.selected != nullptr &&
-      options.target_indices != nullptr) {
-    for (size_t i = 0; i < options.target_count; ++i) {
-      gui2_components::create_check_row(
-          view.partitions_pane, metrics, options.targets[i].name.c_str(), options.selected[i],
-          options.selection_callback,
-          const_cast<void*>(static_cast<const void*>(&options.target_indices[i])));
-    }
-  }
+  refresh_restore_partitions(view, options);
 
   view.options_pane = create_column(view.body, metrics);
 

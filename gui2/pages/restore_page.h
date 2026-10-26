@@ -81,6 +81,11 @@ struct restore_page_view {
 
 restore_page_view build_restore_page(const restore_page_options& options);
 
+// Refresh only the partition rows: automatic snapshot updates must leave the
+// options, textareas and keyboard (including its editing target) alive.
+void refresh_restore_partitions(const restore_page_view& view,
+                                const restore_page_options& options);
+
 // Shows which pane the freshly selected tab owns.
 void show_restore_tab(const restore_page_view& view, size_t index);
 

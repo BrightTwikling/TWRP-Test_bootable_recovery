@@ -1,6 +1,9 @@
 #ifndef GUI2_BACKEND_TWRP_BACKGROUND_BACKEND_H
 #define GUI2_BACKEND_TWRP_BACKGROUND_BACKEND_H
 
+#include <atomic>
+#include <thread>
+
 #include "background_backend.h"
 
 namespace gui2_backend {
@@ -14,8 +17,18 @@ class twrp_background_backend final : public background_backend {
   twrp_background_backend& operator=(const twrp_background_backend&) = delete;
 
   void start() override;
+  void stop() override;
   void poll() override;
+  uint64_t partition_list_revision(const std::string& type) override;
   bool command_running() override;
+
+ private:
+  // Storage worker; hotplug processing can mount and probe partitions.
+  void uevent_loop();
+
+  // Started and joined only by the GUI lifecycle thread.
+  std::thread uevent_thread_;
+  std::atomic<bool> uevent_stop_{ false };
 };
 
 }  // namespace gui2_backend

@@ -77,7 +77,8 @@ bool twrp_decrypt_backend::start_refresh() {
 // GUIAction::refreshsizes
 void twrp_decrypt_backend::run_refresh() {
   operation_start("Refreshing Sizes");
-  PartitionManager.UpdateSystemDetails();
+  // Defer the directory walk so leaving the decrypt prompt stays responsive.
+  PartitionManager.UpdateSystemDetails(true);
   operation_end(0);
   {
     std::lock_guard<std::mutex> lock(mutex_);

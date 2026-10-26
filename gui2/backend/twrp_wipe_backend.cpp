@@ -119,7 +119,7 @@ twrp_wipe_backend::~twrp_wipe_backend() {
 
 std::vector<wipe_target> twrp_wipe_backend::targets() {
   std::vector<PartitionList> list;
-  PartitionManager.GetPartitionList("wipe", &list);
+  PartitionManager.TryGetPartitionList("wipe", &list);
 
   std::vector<wipe_target> result;
   result.reserve(list.size());

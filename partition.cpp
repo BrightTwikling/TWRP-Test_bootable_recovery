@@ -67,6 +67,7 @@
 #include "set_metadata.h"
 #include "gui/gui.hpp"
 #include "unit_conversion.hpp"
+#include "twrp_operation_executor.h"
 
 #ifdef TW_INCLUDE_CRYPTO
 #include "Decrypt.h"
@@ -316,7 +317,8 @@ static std::vector<std::string_view> SplitQuoted(const std::string_view s, const
 }
 
 bool TWPartition::ProcessFstabLine(const char* fstab_line, const bool display_error,
-                                   std::map<std::string, FlagsMap>* twrp_flags) {
+                                   std::map<std::string, FlagsMap>* twrp_flags,
+                                   TWPartition* additional_entry) {
   const std::string_view line(fstab_line);
   // There can't possibly be a valid fstab line that is less than 10 chars
   if (line.size() < 10) return false;
@@ -337,17 +339,14 @@ bool TWPartition::ProcessFstabLine(const char* fstab_line, const bool display_er
 
   const std::vector<std::string> tokens = SplitFstabLine(line);
   std::string twflags;
-  TWPartition* additional_entry = nullptr;
 
   for (size_t i = 0; i < tokens.size(); i++) {
     const std::string& tok = tokens[i];
     if (i == mount_point_index) {
       mount_point_ = tok;
-      if (fstab_version == 2 && !is_super_) {
-        additional_entry = PartitionManager.FindPartitionByPath(mount_point_);
-        if (additional_entry)
-          LOGINFO("Found an additional entry for '%s'\n", mount_point_.c_str());
-      }
+      // Resolve duplicates in the staged table, never in published partitions.
+      if (fstab_version == 2 && additional_entry)
+        LOGINFO("Found an additional entry for '%s'\n", mount_point_.c_str());
       LOGINFO("Processing '%s'\n", mount_point_.c_str());
       backup_path_ = mount_point_;
       storage_path_ = mount_point_;
@@ -655,9 +654,6 @@ void TWPartition::ExcludeAll(const std::string& path) {
 void TWPartition::SetupDataPartition(bool display_error) {
   if (mount_point_ != "/data") return;
 
-  // Ensure /data is not mounted as tmpfs for qcom hardware decrypt
-  Unmount(false);
-
 #ifdef TW_INCLUDE_CRYPTO
 #ifdef TW_PREPARE_DATA_MEDIA_EARLY
   if (datamedia) SetupDataMedia();
@@ -668,11 +664,9 @@ void TWPartition::SetupDataPartition(bool display_error) {
     SetFbeStatus();
     decrypted_block_device_ = crypto_blkdev;
     LOGINFO("Data already decrypted, new block device: '%s'\n", crypto_blkdev.c_str());
-#ifndef TW_PREPARE_DATA_MEDIA_EARLY
-    if (datamedia) SetupDataMedia();
-#endif
-    DataManager::SetValue(TW_IS_ENCRYPTED, 0);
-  } else if (!Mount(false)) {
+  }
+  // A metadata mapping does not initialize this process's DE keys or users.
+  if (!Mount(false)) {
     is_encrypted_ = true;
     is_decrypted_ = false;
     if (datamedia) SetupDataMedia();
@@ -721,6 +715,10 @@ void TWPartition::SetFbeStatus() {
 }
 
 bool TWPartition::DecryptFbeDe() {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
+  if (!IsMounted()) return false;
+  if (de_state_ == DeState::READY) return true;
+  if (de_state_ == DeState::NEEDS_RESTORE) return RestoreDeKeys();
   if (TWFunc::IsPathExists("/data/unencrypted/key/version")) {
     DataManager::SetValue(TW_IS_FBE, 1);
     TWPartitionManager::SetCryptoState();
@@ -747,10 +745,9 @@ bool TWPartition::DecryptFbeDe() {
     ExcludeAll(mount_point_ + "/per_boot"); // removed each boot by init
     ExcludeAll(mount_point_ + "/gsi"); // cow devices
 
-    // Not retried: every attempt installs keys and touches the key directories
-    // again, so a retry only widens the damage when the first one went wrong.
+    // Explicit retries must complete DE setup; ordinary mounts must not retry.
+    de_state_ = DeState::FAILED;
     if (android::keystore::Decrypt_DE()) {
-      de_keys_ready_ = true;
       TWPartitionManager::SetCryptoState();
       is_encrypted_ = true;
       is_decrypted_ = false;
@@ -776,6 +773,7 @@ bool TWPartition::DecryptFbeDe() {
       DataManager::SetValue("tw_crypto_pwtype_0", pwd_type);
       DataManager::SetValue(TW_CRYPTO_PASSWORD, "");
       DataManager::SetValue("tw_crypto_display", "");
+      de_state_ = DeState::READY;
       return true;
     }
 #else
@@ -1241,7 +1239,7 @@ bool TWPartition::MountStorageRetry(const bool display_error) {
 }
 
 bool TWPartition::GetSizeViaStatfs(const bool display_error) {
-  if (!Mount(display_error)) return false;
+  if (!IsMounted()) return false;
 
   struct statfs st{};
   const auto local_path = fs::path(mount_point_);
@@ -1261,8 +1259,8 @@ bool TWPartition::GetSizeViaStatfs(const bool display_error) {
   return true;
 }
 
-bool TWPartition::GetSizeViaDf(const bool display_error) {
-  if (!Mount(display_error)) return false;
+bool TWPartition::GetSizeViaDf(const bool /*display_error*/) {
+  if (!IsMounted()) return false;
 
   // df default output, one row per filesystem with sizes in 1K-blocks:
   //   Filesystem 1K-blocks Used Available Use% Mounted on
@@ -1358,18 +1356,32 @@ bool TWPartition::IsFileSystemWritable() const {
 
 bool TWPartition::RestoreDeKeys() {
 #ifdef TW_INCLUDE_FBE
-  if (is_fbe_ && mount_point_ == "/data" && !de_keys_ready_) {
-    if (!android::keystore::Decrypt_DE()) {
-      LOGERR("Unable to restore DE keys on /data\n");
-      return false;
-    }
-    de_keys_ready_ = true;
+  // Initial or failed setup must go through DecryptFbeDe().
+  if (de_state_ != DeState::NEEDS_RESTORE || !IsMounted()) return false;
+  if (!android::keystore::Decrypt_DE()) {
+    LOGERR("Unable to restore DE keys on /data\n");
+    return false;
   }
+  de_state_ = DeState::READY;
+  return true;
+#else
+  return false;
 #endif
+}
+
+// Invalidates without waiting; defined with the async size state below.
+static void InvalidateDataSizeScan();
+
+bool TWPartition::Mount(const bool display_error) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
+  const bool was_mounted = IsMounted();
+  if (!MountFilesystem(display_error)) return false;
+  // A new mount invalidates sizes measured on the previous filesystem.
+  if (!was_mounted && mount_point_ == "/data") InvalidateDataSizeScan();
   return true;
 }
 
-bool TWPartition::Mount(const bool display_error) {
+bool TWPartition::MountFilesystem(const bool display_error) {
   bool exfat_mounted = false;
   unsigned int flags = mount_flags_;
 
@@ -1504,13 +1516,12 @@ static bool IsPathMounted(const std::string& path) {
   return false;
 }
 
-static void StopAsyncDataSize();
-
 bool TWPartition::Unmount(const bool display_error, const int flags) const {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   if (!IsMounted()) return true;
 
   // A running size walk keeps /data busy and must not outlive its unmount.
-  if (mount_point_ == "/data") StopAsyncDataSize();
+  if (mount_point_ == "/data") StopDataSizeScan();
 
   int never_unmount_system = 0;
   DataManager::GetValue(TW_DONT_UNMOUNT_SYSTEM, never_unmount_system);
@@ -1553,7 +1564,8 @@ bool TWPartition::Unmount(const bool display_error, const int flags) const {
     // that is no longer true.  Unmount() is const, and the lock state is the
     // point of the call, so the cast is deliberate.
     if (is_fbe_ && mount_point_ == "/data") {
-      const_cast<TWPartition*>(this)->de_keys_ready_ = false;
+      if (de_state_ == DeState::READY)
+        const_cast<TWPartition*>(this)->de_state_ = DeState::NEEDS_RESTORE;
       PartitionManager.MarkDataLocked();
     }
     return true;
@@ -2553,14 +2565,19 @@ bool TWPartition::DataIsLocked() {
   return false;
 }
 
+// Only results from the current generation may update live statistics.
 struct AsyncSizeState {
   std::mutex lock;
-  bool running = false;
-  bool worker_active = false;
-  std::atomic<bool> cancel{false};
   std::condition_variable finished;
+  uint64_t generation = 0;
+  // Identity only; workers never dereference partition pointers.
+  TWPartition* running_partition = nullptr;
+  uint64_t running_generation = 0;
   TWPartition* pending_partition = nullptr;
   unsigned long long pending_size = 0;
+  std::shared_ptr<std::atomic<bool>> cancel;
+  // Includes cancelled workers that have not exited yet.
+  int active_workers = 0;
 };
 
 // Keep state alive until detached workers finish.
@@ -2569,93 +2586,121 @@ static AsyncSizeState& GetAsyncSizeState() {
   return *state;
 }
 
-// Waits for a detached size worker to notice the cancel flag. The worker
-// keeps the state alive, so this cannot race with its teardown.
-static void StopAsyncDataSize() {
+static void InvalidateDataSizeScanLocked(AsyncSizeState& state) {
+  if (state.cancel) state.cancel->store(true);
+  ++state.generation;
+  state.pending_partition = nullptr;
+}
+
+// Invalidates without waiting. Safe on any thread: the worker only ever takes
+// state.lock and never the storage transaction.
+static void InvalidateDataSizeScan() {
+  AsyncSizeState& state = GetAsyncSizeState();
+  std::lock_guard lock(state.lock);
+  InvalidateDataSizeScanLocked(state);
+}
+
+void TWPartition::StopDataSizeScan() {
   AsyncSizeState& state = GetAsyncSizeState();
   std::unique_lock lock(state.lock);
-  state.cancel.store(true);
-  state.finished.wait(lock, [&] { return !state.worker_active; });
-  state.pending_partition = nullptr;
-  state.running = false;
+  InvalidateDataSizeScanLocked(state);
+  // Cancelled workers may still hold the mount point.
+  state.finished.wait(lock, [&state] { return state.active_workers == 0; });
+}
+
+TWPartition::~TWPartition() {
+  // Drop identities before the allocator can reuse this partition's address.
+  AsyncSizeState& state = GetAsyncSizeState();
+  std::lock_guard lock(state.lock);
+  if (state.running_partition == this) {
+    state.running_partition = nullptr;
+    if (state.cancel) state.cancel->store(true);
+  }
+  if (state.pending_partition == this) state.pending_partition = nullptr;
 }
 
 void TWPartition::UpdateDataSizeAsync() {
   AsyncSizeState& state = GetAsyncSizeState();
+  if (!backup_size_provisional_) return;
+
+  const std::string path = mount_point_;
+  if (!IsMounted()) {
+    // Nothing to walk, so the statfs figure stays provisional.
+    LOGINFO("'%s' is not mounted, keeping the statfs backup size.\n", path.c_str());
+    return;
+  }
+
+  // The worker owns this snapshot; BackupTar() and Mount() mutate the object.
+  TWExclude exclusions = backup_exclusions;
+  const std::string dev = decrypted_block_device_.empty() ? actual_block_device_ : decrypted_block_device_;
+
+  auto cancel = std::make_shared<std::atomic<bool>>(false);
+  uint64_t generation;
   {
     std::lock_guard lock(state.lock);
-    if (!backup_size_provisional_ || state.running) return;
-    state.running = true;
-    state.worker_active = true;
-    state.cancel.store(false);
+    // Only current-generation work suppresses a new request.
+    if (state.running_partition != nullptr && state.running_generation == state.generation) return;
+    if (state.pending_partition == this) return;
+    generation = ++state.generation;
+    state.cancel = cancel;
+    state.pending_partition = nullptr;
+    state.running_partition = this;
+    state.running_generation = generation;
+    ++state.active_workers;
   }
 
-  // The worker must use a snapshot; BackupTar() mutates the real list.
-  TWExclude exclusions = backup_exclusions;
-  std::string path = mount_point_;
-
-  if (IsMounted()) {
-    auto partition = this;
-    std::string dev = decrypted_block_device_.empty() ? actual_block_device_ : decrypted_block_device_;
-    std::thread([partition, exclusions, path, dev]() mutable {
-      unsigned long long size = 0;
-      // Prefer filesystem counters, then fall back to the directory walk.
-      const std::atomic<bool>* cancel = &GetAsyncSizeState().cancel;
-      const uint64_t es = exclusions.Get_Exclusions_Folder_Size(cancel);
-      if (!cancel->load() && es > 0 && !dev.empty()) {
-        char cmdBuf[256];
-        constexpr char _cmd[] =
-            "dump.f2fs -d1 %s | grep %s | awk -F ': ' '{print $2}' | awk -F ']' '{print $1}'";
-        snprintf(cmdBuf, sizeof(cmdBuf), _cmd, dev.c_str(), "valid_block_count");
-        if (std::string result; TWFunc::ExecCmd(cmdBuf, result, false) == 0) {
-          if (const uint64_t USCount = ParseOrZero<uint64_t>(result); USCount > 0 && USCount <= 354674688ULL) {
-            if (uint64_t used = USCount * 4096; static_cast<int64_t>(used - es) > 0) {
-              snprintf(cmdBuf, sizeof(cmdBuf), _cmd, dev.c_str(), "valid_inode_count");
-              result.clear();
-              if (TWFunc::ExecCmd(cmdBuf, result, false) == 0) {
-                if (const uint64_t UICount = ParseOrZero<uint64_t>(result);
-                  UICount > 0 && used > UICount * 4096) used -= UICount * 4096;
-              }
-              if (static_cast<int64_t>(used - es) > 0) size = used - es;
+  TWPartition* const owner = this;
+  std::thread([owner, exclusions, path, dev, cancel, generation]() mutable {
+    unsigned long long size = 0;
+    // Prefer filesystem counters, then fall back to the directory walk.
+    const std::atomic<bool>* cancel_flag = cancel.get();
+    const uint64_t es = exclusions.Get_Exclusions_Folder_Size(cancel_flag);
+    if (!cancel_flag->load() && es > 0 && !dev.empty()) {
+      char cmdBuf[256];
+      constexpr char _cmd[] =
+          "dump.f2fs -d1 %s | grep %s | awk -F ': ' '{print $2}' | awk -F ']' '{print $1}'";
+      snprintf(cmdBuf, sizeof(cmdBuf), _cmd, dev.c_str(), "valid_block_count");
+      if (std::string result; TWFunc::ExecCmd(cmdBuf, result, false) == 0) {
+        if (const uint64_t USCount = ParseOrZero<uint64_t>(result); USCount > 0 && USCount <= 354674688ULL) {
+          if (uint64_t used = USCount * 4096; static_cast<int64_t>(used - es) > 0) {
+            snprintf(cmdBuf, sizeof(cmdBuf), _cmd, dev.c_str(), "valid_inode_count");
+            result.clear();
+            if (TWFunc::ExecCmd(cmdBuf, result, false) == 0) {
+              if (const uint64_t UICount = ParseOrZero<uint64_t>(result);
+                UICount > 0 && used > UICount * 4096) used -= UICount * 4096;
             }
+            if (static_cast<int64_t>(used - es) > 0) size = used - es;
           }
         }
-        LOGINFO("Data size: f2fs fast path %s (exclusions %lu bytes).\n", size > 0 ? "hit" : "miss", es);
       }
-      if (size == 0 && !cancel->load()) {
-        // dump.f2fs unavailable: use the old walk.
-        LOGINFO("Data size: falling back to folder walk.\n");
-        size = exclusions.Get_Folder_Size(path, false, cancel);
-      }
-      AsyncSizeState& state = GetAsyncSizeState();
-      std::lock_guard lock(state.lock);
-      // A cancelled walk must not publish a partial size or hold the mount.
-      if (!cancel->load()) {
-        state.pending_partition = partition;
-        state.pending_size = size;
-      }
-      state.worker_active = false;
-      state.finished.notify_all();
-    }).detach();
-  } else {
-    LOGINFO("'%s' is not mounted, keeping the statfs backup size.\n", path.c_str());
+      LOGINFO("Data size: f2fs fast path %s (exclusions %lu bytes).\n", size > 0 ? "hit" : "miss", es);
+    }
+    if (size == 0 && !cancel_flag->load()) {
+      // dump.f2fs unavailable: use the old walk.
+      LOGINFO("Data size: falling back to folder walk.\n");
+      size = exclusions.Get_Folder_Size(path, false, cancel_flag);
+    }
+    AsyncSizeState& state = GetAsyncSizeState();
     std::lock_guard lock(state.lock);
-    state.running = false;
-    state.worker_active = false;
+    if (state.running_generation == generation) state.running_partition = nullptr;
+    if (!cancel_flag->load() && state.generation == generation) {
+      state.pending_partition = owner;
+      state.pending_size = size;
+    }
+    --state.active_workers;
     state.finished.notify_all();
-  }
+  }).detach();
 }
 
 void TWPartition::ApplyAsyncDataSize() {
   AsyncSizeState& state = GetAsyncSizeState();
-  uint64_t size;
-  {
-    std::lock_guard lock(state.lock);
-    if (state.pending_partition != this) return;
-    size = state.pending_size;
-    state.pending_partition = nullptr;
-    state.running = false;
-  }
+  std::unique_lock lock(state.lock, std::try_to_lock);
+  // The GUI polls this; a busy lock leaves the result queued for the next poll.
+  if (!lock.owns_lock()) return;
+  if (state.pending_partition != this) return;
+  const uint64_t size = state.pending_size;
+  state.pending_partition = nullptr;
+  lock.unlock();
   used_ = size;
   backup_size_ = size;
   backup_size_provisional_ = false;
@@ -2663,7 +2708,9 @@ void TWPartition::ApplyAsyncDataSize() {
   LOGINFO("Data backup size is %s.\n", UnitConversion::FormatBytes(size).c_str());
 }
 
-bool TWPartition::UpdateSize(const bool display_error, const bool defer_folder_size) {
+bool TWPartition::UpdateSize(const bool display_error, const bool defer_folder_size,
+                             const bool allow_mount) {
+  twrp_operation_executor::guard transaction(twrp_operation_executor::instance().mutex());
   bool ret = false, was_already_mounted = false, ro = false;
 
   FindActualBlockDevice();
@@ -2686,10 +2733,14 @@ bool TWPartition::UpdateSize(const bool display_error, const bool defer_folder_s
   }
 
   was_already_mounted = IsMounted();
+  // Observational refreshes must not mount over ramdisk HAL resources.
+  if (!allow_mount && !was_already_mounted) return FindPartitionSize();
 
-  if (removable_ || is_encrypted_) {
-    if (!Mount(false)) return true;
-  } else if (!Mount(display_error)) return false;
+  if (allow_mount) {
+    if (removable_ || is_encrypted_) {
+      if (!Mount(false)) return true;
+    } else if (!Mount(display_error)) return false;
+  }
 
   ret = GetSizeViaStatfs(display_error);
   if (!ret || size_ == 0) {
@@ -2699,30 +2750,24 @@ bool TWPartition::UpdateSize(const bool display_error, const bool defer_folder_s
     }
   }
 
+  if ((has_data_media_ || has_android_secure_) && allow_mount && !Mount(display_error)) {
+    if (!was_already_mounted) Unmount(false);
+    return false;
+  }
   if (has_data_media_) {
-    if (Mount(display_error)) {
-      if (defer_folder_size) {
-        // Leave the statfs figure in place for now. Whoever deferred
-        // decides whether the walk is worth starting.
-        backup_size_provisional_ = true;
-        LOGINFO("Deferring the data backup size to a background walk.\n");
-      } else {
-        used_ = backup_exclusions.Get_Folder_Size(mount_point_);
-        backup_size_ = used_;
-        backup_size_provisional_ = false;
-        LOGINFO("Data backup size is %s, free: %s.\n", UnitConversion::FormatBytes(used_).c_str(),
-                UnitConversion::FormatBytes(free_).c_str());
-      }
+    // Neither a new estimate nor a synchronous result may be overwritten by an old scan.
+    if (mount_point_ == "/data") InvalidateDataSizeScan();
+    backup_size_provisional_ = defer_folder_size;
+    if (defer_folder_size) {
+      LOGINFO("Deferring the data backup size to a background walk.\n");
     } else {
-      if (!was_already_mounted) Unmount(false);
-      return false;
+      used_ = backup_exclusions.Get_Folder_Size(mount_point_);
+      backup_size_ = used_;
+      LOGINFO("Data backup size is %s, free: %s.\n", UnitConversion::FormatBytes(used_).c_str(),
+              UnitConversion::FormatBytes(free_).c_str());
     }
   } else if (has_android_secure_) {
-    if (Mount(display_error)) backup_size_ = backup_exclusions.Get_Folder_Size(backup_path_);
-    else {
-      if (!was_already_mounted) Unmount(false);
-      return false;
-    }
+    backup_size_ = backup_exclusions.Get_Folder_Size(backup_path_);
   }
   if (!was_already_mounted) Unmount(false);
   return true;
