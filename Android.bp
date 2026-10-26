@@ -468,6 +468,7 @@ cc_binary {
         "twrpRepacker.cpp",
         "twrpTar.cpp",
         "twrp_functions.cpp",
+        "twrp_operation_executor.cpp",
         "unit_conversion.cpp",
         "digest/twrp_digest_driver.cpp",
         "fstab/fstab_parser.cpp",
