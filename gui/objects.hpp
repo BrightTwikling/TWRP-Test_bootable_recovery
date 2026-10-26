@@ -795,6 +795,48 @@ protected:
 
 };
 
+// A position in the console's line buffer, which only ever grows between
+// generation changes; `offset` addresses a byte inside a line whose text did
+// not fit in one bounded read. Feed back the cursor a read returned: those sit on
+// character boundaries, while a cursor from elsewhere is used as it is (moving it
+// would either drop bytes of a sequence that is not UTF-8 or repeat bytes).
+struct GUIConsoleCursor
+{
+	size_t generation = 0;
+	size_t line = 0;
+	size_t offset = 0;
+};
+
+// Budget of one bounded console read. Each field bounds that kind of work and
+// zero means "do none of it", never "no limit": the unbounded entry points are
+// Translate_Now and Get_Lines.
+struct GUIConsoleReadLimits
+{
+	size_t max_lines = 0;    // entries appended to the result, slices of one long line included
+	size_t max_bytes = 0;    // text bytes appended; a slice is only started when it fits whole
+	size_t max_messages = 0; // pending gui_msg() messages translated before copying
+};
+
+struct GUIConsoleReadResult
+{
+	GUIConsoleCursor cursor; // where the next read starts; the input cursor when busy
+	size_t total = 0;        // lines in the buffer at read time
+	bool has_more = false;   // data left at cursor, or messages not translated yet
+	bool busy = false;       // a writer held the console lock, nothing was read
+};
+
+// One returned piece of a console line. A line longer than the byte budget is
+// returned in several pieces that share line_index, and only the last one has
+// continued == false.
+struct GUIConsoleLine
+{
+	std::string text;
+	std::string color;
+	size_t line_index = 0; // index of the stored line text belongs to
+	size_t offset = 0;     // byte offset of text inside that line
+	bool continued = false;
+};
+
 class GUIConsole : public GUIScrollList
 {
 public:
@@ -826,6 +868,15 @@ public:
 	static void Clear_For_Retranslation();
 	static size_t Get_Lines(size_t from, std::vector<std::string>* lines,
 							std::vector<std::string>* colors);
+
+	// Reads at most the given budget of lines and bytes starting at cursor.
+	// Meant for a GUI that must not copy the whole backlog in one frame: the
+	// console lock is only tried, never waited for, and translation is bounded
+	// as well. lines is only written when limits.max_lines and max_bytes allow a
+	// copy (max_bytes below 4 cannot hold a UTF-8 character and copies nothing).
+	static GUIConsoleReadResult Read_Lines(const GUIConsoleCursor& cursor,
+										   const GUIConsoleReadLimits& limits,
+										   std::vector<GUIConsoleLine>* lines);
 protected:
 	enum SlideoutState
 	{

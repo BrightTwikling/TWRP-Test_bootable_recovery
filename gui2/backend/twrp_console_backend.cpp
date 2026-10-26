@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "gui/objects.hpp"
 #include "gui/pages.hpp"
@@ -54,12 +55,31 @@ size_t twrp_console_backend::fetch(size_t from, std::vector<console_line>* lines
 
   lines->reserve(lines->size() + text.size());
   for (size_t i = 0; i < text.size(); ++i) {
-    console_line line;
-    line.text = std::move(text[i]);
-    line.severity = severity_from_color(i < colors.size() ? colors[i] : std::string("normal"));
-    lines->push_back(std::move(line));
+    lines->push_back({std::move(text[i]),
+                      severity_from_color(i < colors.size() ? colors[i] : std::string("normal")),
+                      from + i});
   }
   return total;
+}
+
+console_read_result twrp_console_backend::fetch_bounded(const console_cursor& cursor,
+                                                        const console_read_limits& limits,
+                                                        std::vector<console_line>* lines) {
+  const GUIConsoleCursor read_cursor{cursor.generation, cursor.line, cursor.offset};
+  const GUIConsoleReadLimits read_limits{limits.max_lines, limits.max_bytes, limits.max_messages};
+  std::vector<GUIConsoleLine> read_lines;
+  const GUIConsoleReadResult read =
+      GUIConsole::Read_Lines(read_cursor, read_limits, lines == nullptr ? nullptr : &read_lines);
+
+  if (lines != nullptr) {
+    lines->reserve(lines->size() + read_lines.size());
+    for (GUIConsoleLine& line : read_lines) {
+      lines->push_back({std::move(line.text), severity_from_color(line.color),
+                        line.line_index, line.offset, line.continued});
+    }
+  }
+  return {{read.cursor.generation, read.cursor.line, read.cursor.offset},
+          read.total, read.has_more, read.busy};
 }
 
 // en.xml first, then the language on top, as PageManager::LoadLanguage does.
