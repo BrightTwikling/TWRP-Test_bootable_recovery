@@ -391,8 +391,11 @@ bool TWPartitionManager::ProcessFstabFile(const std::string& fstab_filename,
         entry.fs_type + ' ' + entry.raw_mnt_flags + ' ' + entry.raw_fsmgr_flags;
     TWPartition* additional_entry = nullptr;
     if (!parse_userdata) {
+      const std::string mount_point = TWPartition::IsFileSystem(entry.fs_type) &&
+          (entry.mount_point == "/" || entry.mount_point == "/system" ||
+           entry.mount_point == "/system_root") ? GetAndroidRootPath() : entry.mount_point;
       const auto staged = std::find_if(pending.begin(), pending.end(), [&](const auto& partition) {
-        return partition->mount_point_ == entry.mount_point;
+        return partition->mount_point_ == mount_point;
       });
       if (staged != pending.end()) additional_entry = staged->get();
     }
