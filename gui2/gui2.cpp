@@ -1594,7 +1594,7 @@ static void restore_defaults_event_cb(lv_event_t* event) {
   gui2_shell::set_bottom_navigation_swapped(
       navigation_view, ui, settings->get_int("tw_gui2_swap_navigation", 0) != 0);
   gui2_components::set_keyboard_keep_navigation(
-      settings->get_int("tw_gui2_keyboard_keep_navigation", 0) != 0);
+      settings->get_int("tw_gui2_keyboard_keep_navigation", TW_DEFAULT_KEEP_NAVIGATION_VISIBLE) != 0);
   apply_keyboard_lift(keyboard_lift_percent());
   // tw_language went back to its default as well.
   current_language = language_from_code(settings->get_string("tw_language", "en"));
@@ -5747,7 +5747,7 @@ static void create_gui2_shell(lv_obj_t* screen) {
   // so the stored lift has to be in place before the first page is built.
   apply_keyboard_lift(keyboard_lift_percent());
   gui2_components::set_keyboard_keep_navigation(
-      settings != nullptr && settings->get_int("tw_gui2_keyboard_keep_navigation", 0) != 0);
+      settings != nullptr && settings->get_int("tw_gui2_keyboard_keep_navigation", TW_DEFAULT_KEEP_NAVIGATION_VISIBLE) != 0);
 
   navigate_to(page_kind::HOME, nullptr, page_transition::NONE);
 

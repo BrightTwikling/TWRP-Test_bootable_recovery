@@ -11,7 +11,7 @@ namespace {
 
 // Set from settings before any keyboard exists.
 int lift_pixels = 0;
-bool keep_navigation_visible = false;
+bool keep_navigation_visible = TW_DEFAULT_KEEP_NAVIGATION_VISIBLE;
 keyboard* current_keyboard = nullptr;
 std::vector<keyboard*> active_keyboards;
 
