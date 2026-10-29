@@ -22,8 +22,8 @@ lv_obj_t* create_slider_card(lv_obj_t* parent, const gui2_core::ui_metrics& metr
   const int side_padding = card_inner_padding(metrics);
   const int header_height = std::max(1, metrics.text_font->line_height);
   const int content_gap = std::clamp(metrics.card_gap, gui2_core::ui_px(12), gui2_core::ui_px(18));
-  const int slider_height = std::clamp(std::min(metrics.width, metrics.height) / 19,
-                                       gui2_core::ui_px(28), gui2_core::ui_px(56));
+  const int slider_height = std::clamp(std::min(metrics.width, metrics.height) / 15,
+                                       gui2_core::ui_px(36), gui2_core::ui_px(72));
   const int content_height = header_height + content_gap + slider_height;
   const int card_height = std::max(metrics.card_height, side_padding * 2 + content_height);
   const int card_width = metrics.content_width;
@@ -36,7 +36,8 @@ lv_obj_t* create_slider_card(lv_obj_t* parent, const gui2_core::ui_metrics& metr
   lv_obj_set_size(card, card_width, card_height);
   gui2_core::set_surface_style(card, metrics.card_color);
   lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
-  lv_obj_set_style_radius(card, card_height / 4, LV_PART_MAIN);
+  lv_obj_set_style_radius(card, std::max(metrics.card_height, gui2_core::ui_px(132)) / 4,
+                          LV_PART_MAIN);
   gui2_core::set_card_shadow(card);
   lv_obj_set_overflow_visible(card, true);
   gui2_core::disable_scrolling(card);

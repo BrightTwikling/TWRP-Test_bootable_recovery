@@ -69,8 +69,8 @@ quick_panel_view create_quick_panel(const quick_panel_options& options) {
   if (options.brightness_available && options.brightness_visual != nullptr &&
       options.brightness_value_label != nullptr) {
     const int header_height = std::max(1, metrics.status_font->line_height);
-    const int slider_height = std::clamp(std::min(metrics.width, metrics.height) / 24,
-                                         gui2_core::ui_px(28), gui2_core::ui_px(48));
+    const int slider_height = std::clamp(std::min(metrics.width, metrics.height) / 19,
+                                         gui2_core::ui_px(36), gui2_core::ui_px(60));
     const int slider_gap =
         std::clamp(metrics.card_gap / 2, gui2_core::ui_px(8), gui2_core::ui_px(12));
     lv_obj_t* brightness_label = lv_label_create(view.menu);
