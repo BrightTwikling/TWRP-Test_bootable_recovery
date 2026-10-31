@@ -134,7 +134,7 @@ func globalSharedLibs(ctx android.BaseContext) []string {
 	var sharedLibs []string
 
 	if getMakeBool(ctx, "TW_SUPPORT_INPUT_1_2_HAPTICS") {
-		sharedLibs = append(sharedLibs, "android.hardware.vibrator@1.2")
+		sharedLibs = append(sharedLibs, "android.hardware.vibrator")
 		sharedLibs = append(sharedLibs, "libhidlbase")
 	}
 

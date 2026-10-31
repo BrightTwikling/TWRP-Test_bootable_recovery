@@ -38,10 +38,6 @@
 #include <thread>
 #endif
 
-#ifdef USE_QTI_HAPTICS
-#include <android/hardware/vibrator/1.2/IVibrator.h>
-#endif
-
 #ifdef USE_QTI_AIDL_HAPTICS
 #include <aidl/android/hardware/vibrator/IVibrator.h>
 #include <android/binder_manager.h>
@@ -223,11 +219,6 @@ int vibrate(int timeout_ms)
     char tout[6];
     sprintf(tout, "%i", timeout_ms);
 
-#ifdef USE_QTI_HAPTICS
-    android::sp<android::hardware::vibrator::V1_2::IVibrator> vib = android::hardware::vibrator::V1_2::IVibrator::getService();
-    if (vib != nullptr) {
-        vib->on((uint32_t)timeout_ms);
-    }
 #elif defined(USE_QTI_AIDL_HAPTICS)
     /* getService() blocks for seconds while the HAL is not up yet, and this
      * runs on the thread drawing the UI. */
@@ -282,7 +273,6 @@ int vibrate(int timeout_ms)
     return 0;
 }
 #endif
-#endif
 
 int haptics_available()
 {
@@ -293,8 +283,6 @@ int haptics_available()
 #elif defined(USE_QTI_AIDL_HAPTICS)
     ndk::SpAIBinder binder(AServiceManager_checkService(kVibratorInstance.c_str()));
     return binder.get() != nullptr || twrpminui::force_feedback_available();
-#elif defined(USE_QTI_HAPTICS)
-    return android::hardware::vibrator::V1_2::IVibrator::tryGetService() != nullptr;
 #elif defined(USE_SAMSUNG_HAPTICS)
     return access(VIBRATOR_TIMEOUT_FILE, W_OK) == 0;
 #else
