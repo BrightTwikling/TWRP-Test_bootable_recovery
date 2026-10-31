@@ -96,7 +96,7 @@ int OpenRecoveryScript::copy_script_file(string filename) {
 }
 
 int OpenRecoveryScript::run_script_file(void) {
-	int ret_val = 0, cindex, line_len, i, remove_nl, install_cmd = 0, sideload = 0;
+	int ret_val = 0, cindex, line_len, i, remove_nl, sideload = 0;
 	char script_line[SCRIPT_COMMAND_SIZE], command[SCRIPT_COMMAND_SIZE],
 	     value[SCRIPT_COMMAND_SIZE], mount[SCRIPT_COMMAND_SIZE],
 	     value1[SCRIPT_COMMAND_SIZE], value2[SCRIPT_COMMAND_SIZE];
@@ -145,7 +145,6 @@ int OpenRecoveryScript::run_script_file(void) {
 				// Install Zip
 				DataManager::SetValue("tw_action_text2", "Installing Zip");
 				ret_val = Install_Command(value);
-				install_cmd = -1;
 			} else if (strcmp(command, "wipe") == 0) {
 				// Wipe
 				if (strcmp(value, "cache") == 0 || strcmp(value, "/cache") == 0) {
@@ -374,7 +373,6 @@ int OpenRecoveryScript::run_script_file(void) {
 			} else if (strcmp(command, "sideload") == 0) {
 				// ADB Sideload
 				DataManager::SetValue("tw_action_text2", gui_parse_text("{@sideload}"));
-				install_cmd = -1;
 
 				int wipe_cache = 0;
 				string result;
