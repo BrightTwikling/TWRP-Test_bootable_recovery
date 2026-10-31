@@ -8,7 +8,9 @@
 
 namespace gui2_backend {
 
-// Adapts the recovery PTY engine to GUI2 terminal pages.
+// Everything here forwards to the engine in gui/terminal.cpp. That engine says
+// itself that any number of front ends may share one instance, so gui2 uses the
+// one the legacy terminal page already has rather than opening a second shell.
 class twrp_terminal_backend final : public terminal_backend {
  public:
   bool start() override;

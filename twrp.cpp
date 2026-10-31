@@ -66,8 +66,10 @@
 #include "twcommon.h"
 #include "twrp_functions.hpp"
 #include "variables.h"
-#include "gui2/console/stdio_adapter.h"
-#include "gui2/console/messages.h"
+#include "gui/gui.hpp"
+#include "gui/objects.hpp"
+#include "gui/pages.hpp"
+#include "gui/twmsg.h"
 #include "recovery_utils/battery_utils.h"
 #include "startup/startup_args.hpp"
 
@@ -87,6 +89,44 @@ static void startBatteryMonitor() {
   std::thread(MonitorBattery).detach();
 }
 
+// A small amount of the existing recovery startup path still presents legacy
+// pages (for example, decryption and the system read-only prompt).  Keep that
+// bootstrap available, then release its graphics/input resources before
+// entering GUI2.  This also makes the GUI2 -> legacy handoff use the same
+// initialization sequence as a normal legacy startup.
+static bool legacy_gui_initialized;
+
+static bool initializeLegacyGui(bool reuse_display = false) {
+	if (legacy_gui_initialized)
+		return true;
+
+	if ((reuse_display ? gui_init_reuse_display() : gui_init()) != 0)
+		return false;
+
+	if (gui_loadResources() != 0) {
+		// Do not leave the guard set after a partial initialization. The caller
+		// may still need to fall back to the other UI in this process.
+		return false;
+	}
+
+	PageManager::LoadLanguage(DataManager::GetStrValue("tw_language"));
+	GUIConsole::Translate_Now();
+	legacy_gui_initialized = true;
+	return true;
+}
+
+static void shutdownLegacyGui(bool keep_display) {
+	if (!legacy_gui_initialized)
+		return;
+
+	PageManager::ReleasePackage("TWRP");
+	ev_exit();
+	if (!keep_display)
+		gr_exit();
+	legacy_gui_initialized = false;
+}
+
+
 static void ProcessFastbootdMode() {
   LOGINFO("starting fastboot\n");
 
@@ -94,20 +134,38 @@ static void ProcessFastbootdMode() {
     PartitionManager.UnmapSuperDevices();
   }
 
-  gui2_console::info("fastboot_console_msg");
+  gui_msg(Msg("fastboot_console_msg=Entered Fastbootd mode..."));
   // Check for and run startup script if script exists
   TWFunc::CheckAndRunScript("/system/bin/runatboot.sh", "boot");
   TWFunc::CheckAndRunScript("/system/bin/postfastboot.sh", "fastboot");
 }
 
 
+static void legacy_fastbootd_page() {
+	if (gui_startPage("fastboot", 1, 1) != 0) {
+		LOGERR("Failed to start fastbootd page.\n");
+	}
+}
+
+// What startup reports to. The defaults are the legacy behaviour; the gui2
+// splash overrides them.
 class startup_hooks {
- public:
-  virtual ~startup_hooks() = default;
-  virtual void step(gui2_backend::startup_step) {}
-  virtual void run_script() = 0;
-  virtual void decrypt() = 0;
-  virtual void ask_system_read_only() = 0;
+  public:
+	virtual ~startup_hooks() = default;
+	virtual void step(gui2_backend::startup_step) {}
+	virtual bool legacy_ui() const { return true; }
+	virtual void run_script() { OpenRecoveryScript::Run_OpenRecoveryScript(); }
+	virtual void decrypt() {
+		if (gui_startPage("decrypt", 1, 1) != 0) {
+			LOGERR("Failed to start decrypt GUI page.\n");
+		}
+	}
+	virtual void ask_system_read_only() {
+		DataManager::SetValue("tw_back", "main");
+		if (gui_startPage("system_readonly", 1, 1) != 0) {
+			LOGERR("Failed to start system_readonly GUI page.\n");
+		}
+	}
 };
 
 static void DecryptPage(bool SkipDecryption, bool datamedia, startup_hooks* hooks) {
@@ -241,6 +299,7 @@ static void ProcessRecoveryMode(const bool skip_decryption, startup_hooks* hooks
 
   // Check for and load custom theme if present
   TWFunc::CheckSelinuxSupport();
+  if (hooks->legacy_ui()) gui_loadCustomResources();
   PartitionManager.OutputPartitionLogging();
 
   // Fixup the RTC clock on devices which require it
@@ -269,10 +328,10 @@ static void ProcessRecoveryMode(const bool skip_decryption, startup_hooks* hooks
     android::base::SetProperty("mtp.crash_check", "1");
     LOGINFO("Starting MTP\n");
     if (!PartitionManager.EnableMtp()) PartitionManager.DisableMtp();
-    else gui2_console::info("mtp_enabled");
+    else gui_msg("mtp_enabled=MTP Enabled");
     android::base::SetProperty("mtp.crash_check", "0");
   } else if (mtp_crash_check != "0") {
-    gui2_console::warning("mtp_crash");
+    gui_warn("mtp_crash=MTP Crashed, not starting MTP on boot.");
     DataManager::SetValue("tw_mtp_enabled", 0);
     PartitionManager.DisableMtp();
   } else if (crash_counter == 1) {
@@ -382,7 +441,10 @@ class twrp_startup_backend final : public gui2_backend::startup_backend, public 
 		: skip_decryption_(skip_decryption), fastboot_(fastboot) {}
 	~twrp_startup_backend() override { finish(); }
 
+	bool started() const { return started_; }
+
 	void start() override {
+		started_ = true;
 		worker_ = std::thread(&twrp_startup_backend::run, this);
 	}
 
@@ -436,6 +498,8 @@ class twrp_startup_backend final : public gui2_backend::startup_backend, public 
 		std::lock_guard<std::mutex> lock(mutex_);
 		status_.step = step;
 	}
+
+	bool legacy_ui() const override { return false; }
 
 	void run_script() override {
 		set_pause(gui2_backend::startup_pause::SCRIPT);
@@ -491,14 +555,16 @@ class twrp_startup_backend final : public gui2_backend::startup_backend, public 
 		}
 		ProcessRecoveryMode(skip_decryption_, this);
 
-		// Translate partition names using the active console message catalogue.
+		// gui2 lists partitions by Display_Name, which the legacy language files
+		// translate.
 		step(gui2_backend::startup_step::FINISHING);
-		PartitionManager.TranslatePartitionDisplayNames();
+		PageManager::TranslatePartitionNames(DataManager::GetStrValue("tw_language"));
 		step(gui2_backend::startup_step::DONE);
 	}
 
 	bool skip_decryption_;
 	bool fastboot_;
+	bool started_ = false;
 	std::thread worker_;
 	std::mutex mutex_;
 	std::condition_variable answered_;
@@ -510,7 +576,7 @@ class twrp_startup_backend final : public gui2_backend::startup_backend, public 
 };
 
 static void Reboot() {
-  gui2_console::info("rebooting");
+  gui_msg(Msg("rebooting=Rebooting..."));
   TWFunc::UpdateLogFile();
   std::string reboot_arg;
   DataManager::GetValue("tw_reboot_arg", reboot_arg);
@@ -669,9 +735,35 @@ int main(int argc, char* argv[]) {
 	startBatteryMonitor();
 	const int gui2_result = gui2_start(&gui2_context_value);
 	backlight.stop();
-	if (gui2_result != 0) {
-		LOGERR("GUI2 exited with error %d.\n", gui2_result);
+	if (gui2_result == GUI2_EXIT_STARTUP_FAILED)
 		return -1;
+
+	// GUI2 owns the display and input loop.  A user-requested switch is a
+	// process-local handoff; there is deliberately no persistent GUI selector.
+	// Initialization failures also fall back to the established GUI so recovery
+	// remains usable if a device cannot initialize LVGL or its font resources.
+	if (gui2_result == GUI2_EXIT_TO_LEGACY ||
+		gui2_result == GUI2_EXIT_INITIALIZATION_FAILED) {
+		// gui2 keeps a display it brought up; Qualcomm DRM refuses a second modeset.
+		const bool reuse_display = gr_fb_pixel_bytes() > 0;
+		if (!startup_backend.started()) {
+			startup_hooks legacy_hooks;
+			if (!(fastboot ? run_fastboot_startup(&legacy_hooks) : run_early_startup(&legacy_hooks)))
+				return -1;
+			if (!initializeLegacyGui(reuse_display))
+				LOGERR("Unable to initialize the legacy GUI startup path.\n");
+			if (!fastboot)
+				ProcessRecoveryMode(startup.ShouldSkipDecryption(), &legacy_hooks);
+		} else if (!initializeLegacyGui(reuse_display)) {
+			LOGERR("Unable to initialize the legacy GUI fallback.\n");
+		}
+		if (fastboot) {
+			legacy_fastbootd_page();
+			TWFunc::UpdateIntentFile(startup.GetIntent());
+			Reboot();
+			return 0;
+		}
+		gui_start();
 	}
 	TWFunc::UpdateIntentFile(startup.GetIntent());
 	Reboot();

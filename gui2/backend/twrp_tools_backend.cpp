@@ -5,8 +5,8 @@
 #include <fstream>
 
 #include "data.hpp"
-#include "gui2/console/stdio_adapter.h"
-#include "gui2/console/messages.h"
+#include "gui/gui.hpp"
+#include "gui/twmsg.h"
 #include "partitions.hpp"
 #include "twcommon.h"
 #include "twrp_functions.hpp"
@@ -24,10 +24,16 @@ bool flag(const char* name) {
   return DataManager::GetIntValue(name) != 0;
 }
 
-int repair(const std::string& part_path) {
+// Each returns the operation status the legacy handler hands operation_end:
+// 0 for success.
+
+// GUIAction::repair / resize, on tw_partition_mount_point.
+int repair() {
   int op_status = 0;
 
   operation_start("Repair Partition");
+  std::string part_path;
+  DataManager::GetValue("tw_partition_mount_point", part_path);
   if (PartitionManager.RepairByPath(part_path, true)) {
     op_status = 0;  // success
   } else {
@@ -38,10 +44,12 @@ int repair(const std::string& part_path) {
   return op_status;
 }
 
-int resize(const std::string& part_path) {
+int resize() {
   int op_status = 0;
 
   operation_start("Resize Partition");
+  std::string part_path;
+  DataManager::GetValue("tw_partition_mount_point", part_path);
   if (PartitionManager.ResizeByPath(part_path, true)) {
     op_status = 0;  // success
   } else {
@@ -52,14 +60,19 @@ int resize(const std::string& part_path) {
   return op_status;
 }
 
-int changefilesystem(const std::string& part_path, const std::string& file_system) {
+// GUIAction::changefilesystem, on tw_partition_mount_point and
+// tw_action_new_file_system.
+int changefilesystem() {
   int op_status = 0;
 
   operation_start("Change File System");
+  std::string part_path, file_system;
+  DataManager::GetValue("tw_partition_mount_point", part_path);
+  DataManager::GetValue("tw_action_new_file_system", file_system);
   if (PartitionManager.WipeByPath(part_path, file_system)) {
     op_status = 0;  // success
   } else {
-    gui2_console::log_error("change_fs_err");
+    gui_err("change_fs_err=Error changing file system.");
     op_status = 1;  // fail
   }
   PartitionManager.UpdateSystemDetails();
@@ -98,7 +111,7 @@ int copylog() {
     if (copy_kernel_log) TWFunc::CopyKernelLog(curr_storage);
     if (copy_logcat) TWFunc::CopyLogcat(curr_storage);
     sync();
-    gui2_console::info("copy_log", dst);
+    gui_msg(Msg("copy_log=Copied recovery log to {1}")(dst));
   }
   operation_end(0);
   return 0;
@@ -184,7 +197,7 @@ int applycustomtwrpfolder(std::string arg) {
   bool ret = false;
 
   if (TWFunc::IsPathExists(newFolder)) {
-    gui2_console::log_error("tw_folder_exists");
+    gui_msg(Msg(msg::kError, "tw_folder_exists=A folder with that name already exists!"));
   } else {
     ret = true;
   }
@@ -195,7 +208,7 @@ int applycustomtwrpfolder(std::string arg) {
     if (TWFunc::IsPathExists(prevFolder))
       ret = TWFunc::ExecCmd("mv -f \"" + prevFolder + "\" \"" + newFolder + '\"') == 0;
   } else {
-    gui2_console::log_error("tw_folder_exists");
+    gui_msg(Msg(msg::kError, "tw_folder_exists=A folder with that name already exists!"));
   }
 
   if (ret) ret = TWFunc::RecursiveMkdir(newBackupFolder) ? true : false;
@@ -226,9 +239,9 @@ int fixabrecoverybootloop() {
     DataManager::SetProgress(0);
     TWPartition* part = PartitionManager.FindPartitionByPath("/boot");
     if (part)
-      gui2_console::info("unpacking_image", part->GetDisplayName());
+      gui_msg(Msg("unpacking_image=Unpacking {1}...")(part->GetDisplayName()));
     else {
-      gui2_console::log_error("unable_to_locate", "/boot");
+      gui_msg(Msg(msg::kError, "unable_to_locate=Unable to locate {1}.")("/boot"));
       goto exit;
     }
     if (!repacker.Backup_Image_For_Repack(part, REPACK_ORIG_DIR,
@@ -236,12 +249,12 @@ int fixabrecoverybootloop() {
                                           gui_lookup("repack", "Repack")))
       goto exit;
     DataManager::SetProgress(.25);
-    gui2_console::info("fixing_recovery_loop_patch");
+    gui_msg("fixing_recovery_loop_patch=Patching kernel...");
     std::string command = "cd " REPACK_ORIG_DIR
                           " && /system/bin/magiskboot hexpatch kernel "
                           "77616E745F696E697472616D667300 736B69705F696E697472616D667300";
     if (TWFunc::ExecCmd(command) != 0) {
-      gui2_console::log_error("fix_recovery_loop_patch_error");
+      gui_msg(Msg(msg::kError, "fix_recovery_loop_patch_error=Error patching kernel."));
       goto exit;
     }
     std::string header_path = REPACK_ORIG_DIR;
@@ -252,15 +265,15 @@ int fixabrecoverybootloop() {
                 "header | cut -d= -f2- | sed -e 's/skip_override//' -e 's/  */ /g' -e "
                 "'s/[ \t]*$//')|\" header";
       if (TWFunc::ExecCmd(command) != 0) {
-        gui2_console::log_error("fix_recovery_loop_patch_error");
+        gui_msg(Msg(msg::kError, "fix_recovery_loop_patch_error=Error patching kernel."));
         goto exit;
       }
     }
     DataManager::SetProgress(.5);
-    gui2_console::info("repacking_image", part->GetDisplayName());
+    gui_msg(Msg("repacking_image=Repacking {1}...")(part->GetDisplayName()));
     command = "cd " REPACK_ORIG_DIR " && /system/bin/magiskboot repack " REPACK_ORIG_DIR "boot.img";
     if (TWFunc::ExecCmd(command) != 0) {
-      gui2_console::log_error("repack_error");
+      gui_msg(Msg(msg::kError, "repack_error=Error repacking image."));
       goto exit;
     }
     DataManager::SetProgress(.75);
@@ -294,7 +307,7 @@ int mergesnapshots() {
 int disableAVB2() {
   int op_status = 1;
   operation_start("Disable AVB2.0");
-  gui2_console::highlight("disabling_AVB2");
+  gui_highlight("disabling_AVB2=Disabling AVB2.0...");
   if (PartitionManager.DisableAvb2(true)) {
     op_status = 0;
   }
@@ -313,31 +326,73 @@ twrp_tools_backend::~twrp_tools_backend() {
   if (worker_.joinable()) worker_.join();
 }
 
+// GUIAction::getpartitiondetails, for one partition instead of the first one
+// in tw_wipe_list.
 bool twrp_tools_backend::details(const std::string& mount_point, partition_details* out) {
   if (out == nullptr) return false;
   *out = {};
-  TWPartition* part = PartitionManager.FindPartitionByPath(mount_point);
-  if (part == nullptr) {
+  TWPartition* Part = PartitionManager.FindPartitionByPath(mount_point);
+  if (Part == nullptr) {
     LOGERR("Unable to locate partition: '%s'\n", mount_point.c_str());
+    DataManager::SetValue("tw_partition_name", "");
+    DataManager::SetValue("tw_partition_file_system", "");
+    // Set this to 0 to prevent trying to partition this device, just in case
+    DataManager::SetValue("tw_partition_removable", 0);
     return false;
   }
+  DataManager::SetValue("tw_partition_path", mount_point);
+  DataManager::SetValue("tw_partition_name", Part->display_name_);
+  DataManager::SetValue("tw_partition_mount_point", Part->mount_point_);
+  DataManager::SetValue("tw_partition_file_system", Part->current_file_system_);
+  DataManager::SetValue("tw_partition_size", UnitConversion::FormatBytes(Part->size_));
+  DataManager::SetValue("tw_partition_used", UnitConversion::FormatBytes(Part->used_));
+  DataManager::SetValue("tw_partition_free", UnitConversion::FormatBytes(Part->free_));
+  DataManager::SetValue("tw_partition_backup_size", UnitConversion::FormatBytes(Part->backup_size_));
+  DataManager::SetValue("tw_partition_removable", Part->removable_);
+  DataManager::SetValue("tw_partition_is_present", Part->is_present_);
 
-  out->name = part->display_name_;
-  out->mount_point = part->mount_point_;
-  out->file_system = part->current_file_system_;
-  out->size = UnitConversion::FormatBytes(part->size_);
-  out->used = UnitConversion::FormatBytes(part->used_);
-  out->free = UnitConversion::FormatBytes(part->free_);
-  out->backup_size = UnitConversion::FormatBytes(part->backup_size_);
-  out->present = part->is_present_;
-  out->removable = part->removable_;
-  out->can_repair = part->CanRepair();
-  out->can_resize = part->CanResize();
+  if (Part->CanRepair())
+    DataManager::SetValue("tw_partition_can_repair", 1);
+  else
+    DataManager::SetValue("tw_partition_can_repair", 0);
+  if (Part->CanResize())
+    DataManager::SetValue("tw_partition_can_resize", 1);
+  else
+    DataManager::SetValue("tw_partition_can_resize", 0);
+  if (TWFunc::IsPathExists("/system/bin/mkfs.fat"))
+    DataManager::SetValue("tw_partition_vfat", 1);
+  else
+    DataManager::SetValue("tw_partition_vfat", 0);
+  if (TWFunc::IsPathExists("/system/bin/mkfs.exfat"))
+    DataManager::SetValue("tw_partition_exfat", 1);
+  else
+    DataManager::SetValue("tw_partition_exfat", 0);
+  if (TWFunc::IsPathExists("/system/bin/make_f2fs"))
+    DataManager::SetValue("tw_partition_f2fs", 1);
+  else
+    DataManager::SetValue("tw_partition_f2fs", 0);
   if (TWFunc::IsPathExists("/system/bin/mke2fs"))
+    DataManager::SetValue("tw_partition_ext", 1);
+  else
+    DataManager::SetValue("tw_partition_ext", 0);
+
+  out->name = DataManager::GetStrValue("tw_partition_name");
+  out->mount_point = DataManager::GetStrValue("tw_partition_mount_point");
+  out->file_system = DataManager::GetStrValue("tw_partition_file_system");
+  out->size = DataManager::GetStrValue("tw_partition_size");
+  out->used = DataManager::GetStrValue("tw_partition_used");
+  out->free = DataManager::GetStrValue("tw_partition_free");
+  out->backup_size = DataManager::GetStrValue("tw_partition_backup_size");
+  out->present = flag("tw_partition_is_present");
+  out->removable = flag("tw_partition_removable");
+  out->can_repair = flag("tw_partition_can_repair");
+  out->can_resize = flag("tw_partition_can_resize");
+  // selectfilesystem's buttons, in its order.
+  if (flag("tw_partition_ext"))
     out->file_systems.insert(out->file_systems.end(), { "ext2", "ext3", "ext4" });
-  if (TWFunc::IsPathExists("/system/bin/mkfs.fat")) out->file_systems.push_back("vfat");
-  if (TWFunc::IsPathExists("/system/bin/mkfs.exfat")) out->file_systems.push_back("exfat");
-  if (TWFunc::IsPathExists("/system/bin/make_f2fs")) out->file_systems.push_back("f2fs");
+  if (flag("tw_partition_vfat")) out->file_systems.push_back("vfat");
+  if (flag("tw_partition_exfat")) out->file_systems.push_back("exfat");
+  if (flag("tw_partition_f2fs")) out->file_systems.push_back("f2fs");
   return true;
 }
 
@@ -387,28 +442,48 @@ bool twrp_tools_backend::start(tool_job job, const std::string& target, const st
     std::lock_guard<std::mutex> lock(mutex_);
     state_ = tool_state::RUNNING;
   }
+  // What the legacy buttons set before their confirm_action page.
+  switch (job) {
+    case tool_job::REPAIR:
+    case tool_job::RESIZE:
+      DataManager::SetValue("tw_partition_mount_point", target);
+      break;
+    case tool_job::CHANGE_FILE_SYSTEM:
+      DataManager::SetValue("tw_partition_mount_point", target);
+      DataManager::SetValue("tw_action_new_file_system", value);
+      break;
+    case tool_job::RENAME_BACKUP:
+      DataManager::SetValue("tw_restore_name", base_name(target));
+      DataManager::SetValue("tw_backup_rename", value);
+      break;
+    case tool_job::DELETE_BACKUP:
+      DataManager::SetValue("tw_restore_name", base_name(target));
+      break;
+    default:
+      break;
+  }
   running_.store(true);
-  worker_ = std::thread(&twrp_tools_backend::run, this, job, target, value);
+  worker_ = std::thread(&twrp_tools_backend::run, this, job, value);
   return true;
 }
 
-void twrp_tools_backend::run(tool_job job, std::string target, std::string value) {
+void twrp_tools_backend::run(tool_job job, std::string value) {
   const std::string backups = DataManager::GetStrValue(TW_BACKUPS_FOLDER_VAR);
-  const std::string name = base_name(target);
+  const std::string name = DataManager::GetStrValue("tw_restore_name");
   int op_status = 1;
   switch (job) {
     case tool_job::REPAIR:
-      op_status = repair(target);
+      op_status = repair();
       break;
     case tool_job::RESIZE:
-      op_status = resize(target);
+      op_status = resize();
       break;
     case tool_job::CHANGE_FILE_SYSTEM:
-      op_status = changefilesystem(target, value);
+      op_status = changefilesystem();
       break;
     case tool_job::RENAME_BACKUP:
       op_status = cmd("cd " + backups + " && mv \"" + name + "\" \"" +
-                      value + "\"");
+                      DataManager::GetStrValue("tw_backup_rename") + "\"");
       break;
     case tool_job::DELETE_BACKUP:
       op_status = cmd("cd " + backups + " && rm -rf \"" + name + "\"");

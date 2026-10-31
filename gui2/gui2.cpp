@@ -39,7 +39,7 @@
 #include "gui2_input.h"
 #include "gui2_svg_assets.h"
 #include "gui2_svg_cache.h"
-#include "gui2/console/messages.h"
+#include "gui/twmsg.h"
 #include "i18n/i18n.h"
 #include "lvgl.h"
 #include "pages/action_definitions.h"
@@ -148,6 +148,7 @@ static gui2_pages::page_state page_state;
 static gui2_shell::status_bar_view status_view;
 static gui2_shell::bottom_navigation_view navigation_view;
 static lv_obj_t* mouse_cursor;
+static lv_obj_t* legacy_dialog;
 static gui2_shell::quick_panel_view quick_panel_view;
 static gui2_shell::quick_panel_controller quick_panel_controller;
 static lv_obj_t* quick_record_button;
@@ -160,6 +161,7 @@ static gui2_app::screen_actions screen_actions;
 static gui2_core::wheel_scroll_controller wheel_scroll_controller;
 static bool home_page_active;
 static bool home_navigation_active;
+static bool& switch_to_legacy = runtime.switch_to_legacy;
 static bool fastboot_mode = false;
 static bool& reboot_requested = runtime.reboot_requested;
 
@@ -222,6 +224,12 @@ static void build_page(const gui2_pages::page_request& request);
 
 static const language_pack& strings(void) {
   return gui2_i18n::get_language_pack(current_language);
+}
+
+// Installed into the legacy message catalogue: console output is written in
+// the strings of the legacy language files.
+static std::string console_translator(const std::string& name) {
+  return console == nullptr ? std::string() : console->translate(name);
 }
 
 using gui2_components::create_svg_image;
@@ -446,6 +454,7 @@ enum class settings_target {
   BRIGHTNESS,
   HAPTICS,
   RECORDING,
+  LEGACY,
   EXPORT_LOG,
   CONSOLE_SETTINGS,
   GENERAL_SETTINGS,
@@ -473,6 +482,7 @@ static constexpr settings_target timezone_target = settings_target::TIMEZONE;
 static constexpr settings_target brightness_target = settings_target::BRIGHTNESS;
 static constexpr settings_target haptics_target = settings_target::HAPTICS;
 static constexpr settings_target recording_target = settings_target::RECORDING;
+static constexpr settings_target legacy_target = settings_target::LEGACY;
 static constexpr settings_target export_log_target = settings_target::EXPORT_LOG;
 static constexpr settings_target console_settings_target = settings_target::CONSOLE_SETTINGS;
 static constexpr settings_target general_settings_target = settings_target::GENERAL_SETTINGS;
@@ -839,6 +849,39 @@ static void apply_timezone_event_cb(lv_event_t* event) {
     status_controller.refresh();
   }
   navigate_to(page_kind::TIMEZONE, nullptr, page_transition::REPLACE);
+}
+
+static void legacy_dialog_cancel_event_cb(lv_event_t* event) {
+  if (lv_event_get_code(event) != LV_EVENT_CLICKED || !accept_click(event)) return;
+  auto* dialog = static_cast<lv_obj_t*>(lv_event_get_user_data(event));
+  if (dialog != nullptr) {
+    lv_obj_delete(dialog);
+    if (dialog == legacy_dialog) legacy_dialog = nullptr;
+  }
+}
+
+static void legacy_dialog_confirm_event_cb(lv_event_t* event) {
+  if (lv_event_get_code(event) != LV_EVENT_CLICKED || !accept_click(event)) return;
+  switch_to_legacy = true;
+  auto* dialog = static_cast<lv_obj_t*>(lv_event_get_user_data(event));
+  if (dialog != nullptr) {
+    lv_obj_delete(dialog);
+    if (dialog == legacy_dialog) legacy_dialog = nullptr;
+  }
+}
+
+static void request_legacy_gui_event_cb(lv_event_t* event) {
+  if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+  gui2_shell::confirm_dialog_options options;
+  options.metrics = &ui;
+  options.title = strings().classic_gui_confirm_title;
+  options.body = strings().classic_gui_confirm_body;
+  options.cancel = strings().cancel;
+  options.confirm = strings().classic_gui_confirm;
+  options.cancel_callback = legacy_dialog_cancel_event_cb;
+  options.confirm_callback = legacy_dialog_confirm_event_cb;
+  options.press_guard_callback = press_cancel_guard_cb;
+  legacy_dialog = gui2_shell::create_confirm_dialog(options);
 }
 
 enum class quick_action {
@@ -1351,6 +1394,8 @@ static void settings_option_event_cb(lv_event_t* event) {
              *target == settings_target::REFLASH_TWRP ||
              *target == settings_target::UNMAP_SUPER)
     open_advanced_tool(*target);
+  else
+    request_legacy_gui_event_cb(event);
 }
 
 static void refresh_language_options(void) {
@@ -5460,6 +5505,7 @@ static void show_action_page(const action_definition& definition, page_transitio
     settings_options.haptics_target = &haptics_target;
     settings_options.recording_target = &recording_target;
     settings_options.console_settings_target = &console_settings_target;
+    settings_options.legacy_target = &legacy_target;
     settings_options.has_screen = true;
     settings_options.has_haptics = hardware != nullptr && hardware->has_haptics();
     settings_options.has_recording = screen != nullptr && screen->has_recording();
@@ -5799,7 +5845,6 @@ static constexpr int appearance_values[2] = { 0, 1 };
 // Every object keeps the colors it was built with, so the shell is built again.
 static void rebuild_for_theme(void*) {
   status_controller.stop();
-  if (terminal != nullptr && terminal->running()) terminal->stop();
   page_state.reboot.confirmation_slider.detach();
   page_host.clear();
   screen_lock.reset();
@@ -5935,7 +5980,7 @@ static void poll_startup(uint64_t now_ms) {
   if (!startup_language_known && status.step > gui2_backend::startup_step::SETTINGS) {
     current_language = language_from_code(settings->get_string("tw_language", "en"));
     pending_language = current_language;
-    if (console != nullptr) console->set_language(settings->get_string("tw_language", "en"));
+    if (console != nullptr) console->load_strings(settings->get_string("tw_language", "en"));
     startup_language_known = true;
   }
 
@@ -5960,15 +6005,11 @@ static void poll_startup(uint64_t now_ms) {
 
   startup->finish();
   startup = nullptr;
-  if (console != nullptr) console->retranslate(language_code(current_language));
   gui2_shell::update_splash(&splash_view, strings().startup_finishing, 1.0f);
 
   const bool from_pause = shell_ready;
   const bool from_decrypt = page_state.decrypt_during_startup;
-  if (!create_pages()) {
-    startup_failed = true;
-    return;
-  }
+  if (!create_pages()) switch_to_legacy = true;
   if (page_state.decrypt_during_startup) {
     page_state.decrypt_during_startup = false;
     page_state.decrypt_refreshing = false;
@@ -6120,7 +6161,8 @@ static void show_system_read_only_page(page_transition transition) {
       track_height, strings().sys_ro_swipe, system_ro_allow_cb, nullptr);
 }
 
-static void shutdown_gui2() {
+static void shutdown_gui2(bool keep_display = false) {
+  // Join the hotplug worker before handing the socket to the legacy GUI.
   if (background != nullptr) background->stop();
   flush_hardware_settings();
   if (hardware != nullptr) {
@@ -6130,11 +6172,10 @@ static void shutdown_gui2() {
   }
   if (screen != nullptr && screen->is_recording()) screen->stop_recording();
   status_controller.stop();
-  if (terminal != nullptr && terminal->running()) terminal->stop();
   page_state.reboot.confirmation_slider.detach();
   page_host.clear();
 
-  gui2_app::shutdown_graphics(&graphics);
+  gui2_app::shutdown_graphics(&graphics, keep_display);
   runtime_text_font = nullptr;
   runtime_keyboard_font = nullptr;
   runtime_status_font = nullptr;
@@ -6143,6 +6184,7 @@ static void shutdown_gui2() {
   pointer_indev = nullptr;
   gui2_core::configure_click_guard(nullptr, nullptr);
   status_view = {};
+  msg::SetTranslator(nullptr);
   page_layer = nullptr;
   main_content = nullptr;
   mouse_cursor = nullptr;
@@ -6160,10 +6202,12 @@ static void shutdown_gui2() {
   screen = nullptr;
   reboot = nullptr;
   reboot_requested = false;
+  ev_exit();
+  if (!keep_display) gr_exit();
 }
 
 static bool gui2_loop_should_exit(void*) {
-  return reboot_requested || startup_failed;
+  return switch_to_legacy || reboot_requested || startup_failed;
 }
 
 static void refresh_partition_list() {
@@ -6358,7 +6402,7 @@ static bool terminal_has_focus(void) {
          page_state.console_tab == 1;
 }
 
-// Route character input to the terminal or the active field
+// HardwareKeyboard -> PageManager::NotifyCharInput: the terminal, or the field
 // the on-screen keyboard is typing into.
 static void gui2_loop_char(void*, int ch) {
   if (!shell_ready || input_locked()) return;
@@ -6447,15 +6491,19 @@ int gui2_start(const gui2_context* context) {
   current_language = language_from_code(settings->get_string("tw_language", "en"));
   pending_language = current_language;
   startup_language_known = startup == nullptr;
-  gui2_console::set_language(current_language);
+  if (startup == nullptr && console != nullptr)
+    console->load_strings(settings->get_string("tw_language", "en"));
   startup_input_rescanned = startup == nullptr;
   startup_failed = false;
   shell_ready = false;
+  msg::SetTranslator(console_translator);
+  switch_to_legacy = false;
   reboot_requested = false;
   screen_actions.reset();
 
   if (!gui2_app::initialize_graphics(context, &graphics, lv_tick_ms)) {
-    shutdown_gui2();
+    // Keep the display: Qualcomm DRM refuses a second modeset in the fallback.
+    shutdown_gui2(true);
     return GUI2_EXIT_INITIALIZATION_FAILED;
   }
   runtime_text_font = graphics.text_font;
@@ -6513,9 +6561,9 @@ int gui2_start(const gui2_context* context) {
   splash_view = {};
   shell_ready = false;
   if (startup_failed) {
-    shutdown_gui2();
+    shutdown_gui2(true);
     return GUI2_EXIT_STARTUP_FAILED;
   }
-  shutdown_gui2();
-  return 0;
+  shutdown_gui2(switch_to_legacy);
+  return switch_to_legacy ? GUI2_EXIT_TO_LEGACY : 0;
 }

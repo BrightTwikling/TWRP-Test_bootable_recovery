@@ -36,10 +36,14 @@
 #include <fstab/fstab.h>
 
 #include "data.hpp"
+#ifndef TW_NO_SCREEN_TIMEOUT
+#include "gui/blanktimer.hpp"
+#endif
 
 #include <android-base/properties.h>
 
-#include "gui2/console/stdio_adapter.h"
+#include "gui/gui.hpp"
+#include "gui/pages.hpp"
 #include "infomanager.hpp"
 #include "variables.h"
 #include "partitions.hpp"
@@ -109,6 +113,12 @@ int DataManager::LoadValues(const std::string& filename) {
   // Read in the file, if possible
   pthread_mutex_lock(&values_lock_);
   persist_.LoadValues();
+
+#ifndef TW_NO_SCREEN_TIMEOUT
+  if (const std::optional<int> timeout = persist_["tw_screen_timeout_secs"]) {
+    blankTimer.setTime(timeout.value());
+  }
+#endif
 
   pthread_mutex_unlock(&values_lock_);
   const std::string current = GetCurrentStoragePath();
@@ -271,9 +281,17 @@ int DataManager::SetValue(const std::string& key, const std::string& value,
 
   pthread_mutex_unlock(&values_lock_);
 
-  if (key == "tw_storage_path") {
-    SetBackupFolder();
-  }
+#ifndef TW_NO_SCREEN_TIMEOUT
+  if (key == "tw_screen_timeout_secs") {
+    int timeout = 0;
+    std::from_chars(value.data(), value.data() + value.size(), timeout);
+    blankTimer.setTime(timeout);
+  } else
+#endif
+    if (key == "tw_storage_path") {
+      SetBackupFolder();
+    }
+  gui_notifyVarChange(key.c_str(), value.c_str());
   return 0;
 }
 
@@ -388,7 +406,7 @@ void DataManager::SetBackupFolder() {
   } else {
     if (PartitionManager.FstabProcessed()) {
       LOGINFO("Storage partition '%s' not found\n", backup_path.c_str());
-      gui2_console::log_error("unable_locate_storage");
+      gui_err("unable_locate_storage=Unable to locate storage device.");
     }
   }
 }
@@ -947,7 +965,7 @@ void DataManager::ReadSettingsFile() {
   {
     usleep(500000);
     if (!PartitionManager.MountSettingsStorage(false))
-      gui2_console::log_error("unable_to_mount", settings_file);
+      gui_msg(Msg(msg::kError, "unable_to_mount=Unable to mount {1}")(settings_file));
   }
 
   mkdir(mkdir_path, 0777);

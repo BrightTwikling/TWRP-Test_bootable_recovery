@@ -1,6 +1,6 @@
 #include "twrp_terminal_backend.h"
 
-#include "gui2/backend/terminal_engine.h"
+#include "gui/terminal.hpp"
 
 namespace gui2_backend {
 

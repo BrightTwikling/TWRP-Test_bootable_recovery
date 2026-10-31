@@ -100,7 +100,8 @@ bool twrp_reboot_backend::request_reboot(reboot_target target) {
   if (argument == nullptr || !is_supported(target)) return false;
 
   sync();
-  return DataManager::SetValue("tw_reboot_arg", argument) == 0;
+  return DataManager::SetValue("tw_reboot_arg", argument) == 0 &&
+         DataManager::SetValue("tw_gui_done", 1) == 0;
 }
 
 // The fastboot page's switch, on tw_enable_fastboot.

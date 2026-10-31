@@ -19,7 +19,7 @@
 #ifndef TWCOMMON_HPP
 #define TWCOMMON_HPP
 
-#include "gui2/console/stdio_adapter.h"
+#include "gui/gui.hpp"
 #define LOGERR(...) gui_print_color("error", "E:" __VA_ARGS__)
 #define LOGINFO(...) fprintf(stdout, "I:" __VA_ARGS__)
 

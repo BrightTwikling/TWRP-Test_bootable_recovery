@@ -47,7 +47,8 @@
 #include "variables.h"
 #include "data.hpp"
 #include "fuse_sideload.h"
-#include "gui2/console/stdio_adapter.h"
+#include "gui/gui.hpp"
+#include "gui/pages.hpp"
 #include "orscmd/orscmd.h"
 #include "twinstall.h"
 #include "twinstall/adb_install.h"
@@ -66,7 +67,7 @@ int OpenRecoveryScript::check_for_script_file(void) {
 	orsFile += "/recovery/openrecoveryscript";
 	if (!PartitionManager.MountByPath(orsFile, false)) {
 		LOGINFO("Unable to mount %s for OpenRecoveryScript support.\n", logDir.c_str());
-		gui2_console::log_error("unable_to_mount", logDir.c_str());
+		gui_msg(Msg(msg::kError, "unable_to_mount=Unable to mount {1}")(logDir.c_str()));
 		return 0;
 	}
 	if (TWFunc::IsPathExists(orsFile)) {
@@ -170,7 +171,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				}
 			} else if (strcmp(command, "backup") == 0) {
 				// Backup
-				DataManager::SetValue("tw_action_text2", gui2_console::text("backing"));
+				DataManager::SetValue("tw_action_text2", gui_parse_text("{@backing}"));
 				tok = strtok(value, " ");
 				strcpy(value1, tok);
 				tok = strtok(NULL, " ");
@@ -187,7 +188,7 @@ int OpenRecoveryScript::run_script_file(void) {
 						remove_nl = 0;
 					strncpy(value2, tok, line_len - remove_nl);
 					DataManager::SetValue(TW_BACKUP_NAME, value2);
-					gui2_console::info("backup_folder_set", value2);
+					gui_msg(Msg("backup_folder_set=Backup folder set to '{1}'")(value2));
 					if (!TWPartitionManager::IsBackupNameValid(value2, true, true)) {
 						ret_val = 1;
 						continue;
@@ -200,7 +201,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				ret_val = Backup_Command(value1);
 			} else if (strcmp(command, "restore") == 0) {
 				// Restore
-				DataManager::SetValue("tw_action_text2", gui2_console::text("restore"));
+				DataManager::SetValue("tw_action_text2", gui_parse_text("{@restore}"));
 				PartitionManager.MountAllStorage();
 				DataManager::SetValue(TW_SKIP_DIGEST_CHECK_VAR, 0);
 				char folder_path[512], partitions[512];
@@ -217,7 +218,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				}
 				strcpy(folder_path, restore_folder.c_str());
 				LOGINFO("Restore folder is: '%s' and partitions: '%s'\n", folder_path, partitions);
-				gui2_console::info("restoring", folder_path);
+				gui_msg(Msg("restoring=Restoring {1}...")(folder_path));
 
 				if (folder_path[0] != '/') {
 					char backup_folder[512];
@@ -244,7 +245,7 @@ int OpenRecoveryScript::run_script_file(void) {
 						strcat(folder_path, "/.");
 				}
 				if (!TWFunc::IsPathExists(folder_path)) {
-					gui2_console::log_error("locate_backup_err", folder_path);
+					gui_msg(Msg(msg::kError, "locate_backup_err=Unable to locate backup '{1}'")(folder_path));
 					ret_val = 1;
 					continue;
 				}
@@ -260,33 +261,33 @@ int OpenRecoveryScript::run_script_file(void) {
 
 					memset(value2, 0, sizeof(value2));
 					strcpy(value2, partitions);
-					gui2_console::info("set_restore_opt", value2);
+					gui_msg(Msg("set_restore_opt=Setting restore options: '{1}':")(value2));
 					line_len = strlen(value2);
 					for (i=0; i<line_len; i++) {
 						if ((value2[i] == 'S' || value2[i] == 's') && Partition_List.find("/system;") != string::npos) {
 							Restore_List += "/system;";
-							gui2_console::info("system");
+							gui_msg("system=System");
 						} else if ((value2[i] == 'D' || value2[i] == 'd') && Partition_List.find("/data;") != string::npos) {
 							Restore_List += "/data;";
-							gui2_console::info("data");
+							gui_msg("data=Data");
 						} else if ((value2[i] == 'C' || value2[i] == 'c') && Partition_List.find("/cache;") != string::npos) {
 							Restore_List += "/cache;";
-							gui2_console::info("cache");
+							gui_msg("cache=Cache");
 						} else if ((value2[i] == 'R' || value2[i] == 'r') && Partition_List.find("/recovery;") != string::npos) {
 							Restore_List += "/recovery;";
-							gui2_console::info("recovery");
+							gui_msg("recovery=Recovery");
 						} else if ((value2[i] == 'B' || value2[i] == 'b') && Partition_List.find("/boot;") != string::npos) {
 							Restore_List += "/boot;";
-							gui2_console::info("boot");
+							gui_msg("boot=Boot");
 						} else if ((value2[i] == 'A' || value2[i] == 'a')  && Partition_List.find("/and-sec;") != string::npos) {
 							Restore_List += "/and-sec;";
-							gui2_console::info("android_secure");
+							gui_msg("android_secure=Android Secure");
 						} else if ((value2[i] == 'E' || value2[i] == 'e')  && Partition_List.find("/sd-ext;") != string::npos) {
 							Restore_List += "/sd-ext;";
-							gui2_console::info("sdext");
+							gui_msg("sdext=SD-EXT");
 						} else if (value2[i] == 'M' || value2[i] == 'm') {
 							DataManager::SetValue(TW_SKIP_DIGEST_CHECK_VAR, 1);
-							gui2_console::info("digest_check_skip");
+							gui_msg("digest_check_skip=Digest check skip is on");
 						}
 					}
 
@@ -295,17 +296,17 @@ int OpenRecoveryScript::run_script_file(void) {
 					DataManager::SetValue("tw_restore_selected", Partition_List);
 				}
 				if (is_encrypted) {
-					gui2_console::log_error("ors_encrypt_restore_err");
+					gui_err("ors_encrypt_restore_err=Unable to use OpenRecoveryScript to restore an encrypted backup.");
 					ret_val = 1;
 				} else if (!PartitionManager.RunRestore(folder_path))
 					ret_val = 1;
 				else
-					gui2_console::info("done");
+					gui_msg("done=Done.");
 			} else if (strcmp(command, "remountrw") == 0) {
 				ret_val = remountrw();
 			} else if (strcmp(command, "mount") == 0) {
 				// Mount
-				DataManager::SetValue("tw_action_text2", gui2_console::text("mounting"));
+				DataManager::SetValue("tw_action_text2", gui_parse_text("{@mounting}"));
 				if (value[0] != '/') {
 					strcpy(mount, "/");
 					strcat(mount, value);
@@ -314,10 +315,10 @@ int OpenRecoveryScript::run_script_file(void) {
 				if (!strcmp(mount, "/system"))
 					strcpy(mount, PartitionManager.GetAndroidRootPath().c_str());
 				if (PartitionManager.MountByPath(mount, true))
-					gui2_console::info("mounted", mount);
+					gui_msg(Msg("mounted=Mounted '{1}'")(mount));
 			} else if (strcmp(command, "unmount") == 0 || strcmp(command, "umount") == 0) {
 				// Unmount
-				DataManager::SetValue("tw_action_text2", gui2_console::text("unmounting"));
+				DataManager::SetValue("tw_action_text2", gui_parse_text("{@unmounting}"));
 				if (value[0] != '/') {
 					strcpy(mount, "/");
 					strcat(mount, value);
@@ -326,7 +327,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				if (!strcmp(mount, "/system"))
 					strcpy(mount, PartitionManager.GetAndroidRootPath().c_str());
 				if (PartitionManager.UnmountByPath(mount, true))
-					gui2_console::info("unmounted", mount);
+					gui_msg(Msg("unmounted=Unounted '{1}'")(mount));
 			} else if (strcmp(command, "set") == 0) {
 				// Set value
 				size_t len = strlen(value);
@@ -334,16 +335,16 @@ int OpenRecoveryScript::run_script_file(void) {
 				strcpy(value1, tok);
 				if (len > strlen(value1) + 1) {
 					char *val2 = value + strlen(value1) + 1;
-					gui2_console::info("setting", value1, val2);
+					gui_msg(Msg("setting=Setting '{1}' to '{2}'")(value1)(val2));
 					DataManager::SetValue(value1, val2);
 				} else {
-					gui2_console::info("setting_empty", value1);
+					gui_msg(Msg("setting_empty=Setting '{1}' to empty")(value1));
 					DataManager::SetValue(value1, "");
 				}
 			} else if (strcmp(command, "mkdir") == 0) {
 				// Make directory (recursive)
-				DataManager::SetValue("tw_action_text2", gui2_console::text("making_dir1"));
-				gui2_console::info("making_dir2", value);
+				DataManager::SetValue("tw_action_text2", gui_parse_text("{@making_dir1}"));
+				gui_msg(Msg("making_dir2=Making directory: '{1}'")(value));
 				if (!TWFunc::RecursiveMkdir(value)) {
 					// error message already displayed by RecursiveMkdir
 					ret_val = 1;
@@ -362,7 +363,7 @@ int OpenRecoveryScript::run_script_file(void) {
 				else
 					TWFunc::TwReboot(SYSTEM);
 			} else if (strcmp(command, "cmd") == 0) {
-				DataManager::SetValue("tw_action_text2", gui2_console::text("running_command"));
+				DataManager::SetValue("tw_action_text2", gui_parse_text("{@running_command}"));
 				if (cindex != 0) {
 					TWFunc::ExecCmd(value);
 				} else {
@@ -372,19 +373,19 @@ int OpenRecoveryScript::run_script_file(void) {
 				gui_print("%s\n", value);
 			} else if (strcmp(command, "sideload") == 0) {
 				// ADB Sideload
-				DataManager::SetValue("tw_action_text2", gui2_console::text("sideload"));
+				DataManager::SetValue("tw_action_text2", gui_parse_text("{@sideload}"));
 				install_cmd = -1;
 
 				int wipe_cache = 0;
 				string result;
 
-				gui2_console::info("start_sideload");
+				gui_msg("start_sideload=Starting ADB sideload feature...");
 
 				Device::BuiltinAction reboot_action = Device::REBOOT_BOOTLOADER;
 				ret_val = twrp_sideload("/", &reboot_action);
 				if (ret_val != 0) {
 					if (ret_val == -2)
-						gui2_console::log_error("need_new_adb");
+						gui_err("need_new_adb=You need adb 1.0.32 or newer to sideload to this device.");
 					ret_val = 1; // failure
 				} else if (TWinstall_zip(FUSE_SIDELOAD_HOST_PATHNAME, &wipe_cache) == 0) {
 					if (wipe_cache)
@@ -407,7 +408,7 @@ int OpenRecoveryScript::run_script_file(void) {
 					waitpid(sideload_child_pid, &status, 0);
 				}
 				property_set("ctl.start", "adbd");
-				gui2_console::info("done");
+				gui_msg("done=Done.");
 			} else if (strcmp(command, "fixperms") == 0 || strcmp(command, "fixpermissions") == 0 || strcmp(command, "fixcontexts") == 0) {
 				ret_val = PartitionManager.FixContexts();
 				if (ret_val != 0)
@@ -427,7 +428,7 @@ int OpenRecoveryScript::run_script_file(void) {
 					if (ret_val != 0)
 						ret_val = 1;  // failure
 				} else {
-					gui2_console::log_error("no_pwd");
+					gui_err("no_pwd=No password provided.");
 					ret_val = 1;  // failure
 				}
 			} else if (strcmp(command, "listmounts") == 0) {
@@ -439,9 +440,10 @@ int OpenRecoveryScript::run_script_file(void) {
 		}
 		fclose(fp);
 		unlink(SCRIPT_FILE_TMP);
-		gui2_console::info("done_ors");
+		gui_msg("done_ors=Done processing script file");
 	} else {
-		gui2_console::log_error("error_opening_strerr", SCRIPT_FILE_TMP, strerror(errno));
+		gui_msg(Msg(msg::kError, "error_opening_strerr=Error opening: '{1}' ({2})")(SCRIPT_FILE_TMP)(
+			strerror(errno)));
 		return 1;
 	}
 
@@ -474,11 +476,11 @@ int OpenRecoveryScript::Install_Command(string Zip) {
 		Full_Path = Zip.substr(1);
 		if (!PartitionManager.MountByPath(Full_Path, true) || !TWFunc::IsPathExists(Full_Path)) {
 			LOGINFO("Unable to install via mapped zip '%s'\n", Full_Path.c_str());
-			gui2_console::log_error("zip_err", Zip);
+			gui_msg(Msg(msg::kError, "zip_err=Error installing zip file '{1}'")(Zip));
 			return 1;
 		}
 		LOGINFO("Installing mapped zip file '%s'\n", Full_Path.c_str());
-		gui2_console::info("installing_zip", Zip);
+		gui_msg(Msg("installing_zip=Installing zip file '{1}'")(Zip));
 	} else if (!TWFunc::IsPathExists(Zip)) {
 		PartitionManager.MountAllStorage();
 		PartitionManager.GetPartitionList("storage", &Storage_List);
@@ -504,12 +506,12 @@ int OpenRecoveryScript::Install_Command(string Zip) {
 			gui_print("Unable to locate zip file '%s'.\n", Zip.c_str());
 			ret_val = 1;
 		} else
-			gui2_console::info("installing_zip", Zip);
+			gui_msg(Msg("installing_zip=Installing zip file '{1}'")(Zip));
 	}
 
 	ret_val = TWinstall_zip(Zip.c_str(), &wipe_cache);
 	if (ret_val != 0) {
-		gui2_console::log_error("zip_err", Zip);
+		gui_msg(Msg(msg::kError, "zip_err=Error installing zip file '{1}'")(Zip));
 		ret_val = 1;
 	} else if (wipe_cache)
 		PartitionManager.WipeByPath("/cache");
@@ -551,21 +553,21 @@ int OpenRecoveryScript::Backup_Command(string Options) {
 	DataManager::SetValue(TW_USE_COMPRESSION_VAR, 0);
 	DataManager::SetValue(TW_SKIP_DIGEST_GENERATE_VAR, 0);
 
-	gui2_console::info("select_backup_opt");
+	gui_msg("select_backup_opt=Setting backup options:");
 	line_len = Options.size();
 	for (i=0; i<line_len; i++) {
 		if (Options.substr(i, 1) == "S" || Options.substr(i, 1) == "s") {
 			Backup_List += "/system;";
-			gui2_console::info("system");
+			gui_msg("system=System");
 		} else if (Options.substr(i, 1) == "D" || Options.substr(i, 1) == "d") {
 			Backup_List += "/data;";
-			gui2_console::info("data");
+			gui_msg("data=Data");
 		} else if (Options.substr(i, 1) == "C" || Options.substr(i, 1) == "c") {
 			Backup_List += "/cache;";
-			gui2_console::info("cache");
+			gui_msg("cache=Cache");
 		} else if (Options.substr(i, 1) == "R" || Options.substr(i, 1) == "r") {
 			Backup_List += "/recovery;";
-			gui2_console::info("recovery");
+			gui_msg("recovery=Recovery");
 		} else if (Options.substr(i, 1) == "1") {
 			gui_print("%s\n", "Special1 -- No Longer Supported...");
 		} else if (Options.substr(i, 1) == "2") {
@@ -574,30 +576,49 @@ int OpenRecoveryScript::Backup_Command(string Options) {
 			gui_print("%s\n", "Special3 -- No Longer Supported...");
 		} else if (Options.substr(i, 1) == "B" || Options.substr(i, 1) == "b") {
 			Backup_List += "/boot;";
-			gui2_console::info("boot");
+			gui_msg("boot=Boot");
 		} else if (Options.substr(i, 1) == "A" || Options.substr(i, 1) == "a") {
 			Backup_List += "/and-sec;";
-			gui2_console::info("android_secure");
+			gui_msg("android_secure=Android Secure");
 		} else if (Options.substr(i, 1) == "E" || Options.substr(i, 1) == "e") {
 			Backup_List += "/sd-ext;";
-			gui2_console::info("sdext");
+			gui_msg("sdext=SD-EXT");
 		} else if (Options.substr(i, 1) == "O" || Options.substr(i, 1) == "o") {
 			DataManager::SetValue(TW_USE_COMPRESSION_VAR, 1);
-			gui2_console::info("compression_on");
+			gui_msg("compression_on=Compression is on");
 		} else if (Options.substr(i, 1) == "M" || Options.substr(i, 1) == "m") {
 			DataManager::SetValue(TW_SKIP_DIGEST_GENERATE_VAR, 1);
-			gui2_console::info("digest_off");
+			gui_msg("digest_off=Digest Generation is off");
 		}
 	}
 	DataManager::SetValue("tw_backup_list", Backup_List);
 	if (!PartitionManager.RunBackup()) {
-		gui2_console::log_error("backup_fail");
+		gui_err("backup_fail=Backup Failed");
 		return 1;
 	}
-	gui2_console::info("backup_complete");
+	gui_msg("backup_complete=Backup Complete");
 	return 0;
 }
 
+// this is called by main()
+void OpenRecoveryScript::Run_OpenRecoveryScript(void) {
+	DataManager::SetValue("tw_back", "main");
+	DataManager::SetValue("tw_action", "openrecoveryscript");
+	DataManager::SetValue("tw_action_param", "");
+	DataManager::SetValue("tw_has_action2", "0");
+	DataManager::SetValue("tw_action2", "");
+	DataManager::SetValue("tw_action2_param", "");
+	DataManager::SetValue("tw_action_text1", gui_lookup("running_ors", "Running OpenRecoveryScript"));
+	DataManager::SetValue("tw_complete_text1", gui_lookup("ors_complete", "OpenRecoveryScript Complete"));
+	DataManager::SetValue("tw_action_text2", "");
+	DataManager::SetValue("tw_has_cancel", 0);
+	DataManager::SetValue("tw_show_reboot", 0);
+	if (gui_startPage("action_page", 0, 1) != 0) {
+		LOGERR("Failed to load OpenRecoveryScript GUI page.\n");
+	}
+}
+
+// this is called by the "openrecoveryscript" GUI action called via action page from Run_OpenRecoveryScript
 int OpenRecoveryScript::Run_OpenRecoveryScript_Action() {
 	int op_status = 1;
 	// Check for the SCRIPT_FILE_TMP first as these are AOSP recovery commands
@@ -605,7 +626,7 @@ int OpenRecoveryScript::Run_OpenRecoveryScript_Action() {
 	// Run those first.
 	int reboot = 0;
 	if (TWFunc::IsPathExists(SCRIPT_FILE_TMP)) {
-		gui2_console::info("running_recovery_commands");
+		gui_msg("running_recovery_commands=Running Recovery Commands");
 		if (OpenRecoveryScript::run_script_file() == 0) {
 			reboot = 1;
 			op_status = 0;
@@ -613,7 +634,7 @@ int OpenRecoveryScript::Run_OpenRecoveryScript_Action() {
 	}
 	// Check for the ORS file in /cache and attempt to run those commands.
 	if (OpenRecoveryScript::check_for_script_file()) {
-		gui2_console::info("running_ors");
+		gui_msg("running_ors=Running OpenRecoveryScript");
 		if (OpenRecoveryScript::run_script_file() == 0) {
 			reboot = 1;
 			op_status = 0;
@@ -631,7 +652,7 @@ int OpenRecoveryScript::Run_OpenRecoveryScript_Action() {
 	return op_status;
 }
 
-// Runs commands received by the background ORS FIFO listener.
+// this is called by the "twcmd" GUI action when a command is received via FIFO from the "twrp" command line tool
 void OpenRecoveryScript::Run_CLI_Command(const char* command) {
 	string tmp = command;
 	std::vector<string> parts =
@@ -661,14 +682,14 @@ void OpenRecoveryScript::Run_CLI_Command(const char* command) {
 	} else if (cmd_str == "decrypt") {
 		// twrp cmd cannot decrypt a password with space, should decrypt on gui
 		if (parts.size() == 1) {
-			gui2_console::log_error("no_pwd");
+			gui_err("no_pwd=No password provided.");
 		} else {
 			string pass = parts[1];
 			string userid = "0";
 			if (parts.size() > 2)
 				userid = parts[2];
 
-			gui2_console::info("decrypt_cmd");
+			gui_msg("decrypt_cmd=Attempting to decrypt data partition or user data via command line.");
 			if (PartitionManager.DecryptDevice(pass, atoi(userid.c_str())) == 0) {
 				// set_page_done = 1;  // done by singleaction_page anyway
 				std::string orsFile = TWFunc::GetLogDir() + "/openrecoveryscript";

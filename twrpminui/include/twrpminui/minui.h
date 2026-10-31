@@ -19,6 +19,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include "gui/placement.h"
 
 struct GRSurface {
   int width;

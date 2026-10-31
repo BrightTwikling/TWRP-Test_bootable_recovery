@@ -88,7 +88,7 @@ std::vector<restore_backup> twrp_restore_backend::backups() {
   return result;
 }
 
-// Keep the selected directory in the backend.
+// The selector writes tw_restore, and readBackup reads the folder.
 bool twrp_restore_backend::open(const std::string& path) {
   if (running_.load() || path.empty()) return false;
 
@@ -97,7 +97,10 @@ bool twrp_restore_backend::open(const std::string& path) {
   // An unreadable folder must not retain the previous backup's targets.
   DataManager::SetValue("tw_restore_list", "");
   opened_.clear();
-  PartitionManager.SetRestoreFiles(path);
+  DataManager::SetValue("tw_restore", path);
+  std::string Restore_Name;
+  DataManager::GetValue("tw_restore", Restore_Name);
+  PartitionManager.SetRestoreFiles(Restore_Name);
   std::string list;
   DataManager::GetValue("tw_restore_list", list);
   if (list.empty()) return false;
@@ -132,7 +135,8 @@ std::string twrp_restore_backend::date() {
   return value;
 }
 
-// The restore core reads this password again for every encrypted archive.
+// restore_decrypt writes tw_restore_password; decrypt_backup checks it, and
+// the restore itself reads it again for every encrypted archive.
 bool twrp_restore_backend::unlock(const std::string& password) {
   if (opened_.empty() || password.empty()) return false;
   DataManager::SetValue("tw_restore_password", password);
@@ -141,9 +145,12 @@ bool twrp_restore_backend::unlock(const std::string& password) {
 
   operation_start("Try Restore Decrypt");
   {
-    const std::string restore_path = opened_ + "/";
+    std::string Restore_Path, Filename, Password;
+    DataManager::GetValue("tw_restore", Restore_Path);
+    Restore_Path += "/";
+    DataManager::GetValue("tw_restore_password", Password);
     TWFunc::SetPerformanceMode(true);
-    if (TWFunc::TryDecryptingBackup(restore_path, password))
+    if (TWFunc::TryDecryptingBackup(Restore_Path, Password))
       op_status = 0;  // success
     else
       op_status = 1;  // fail
@@ -172,16 +179,18 @@ bool twrp_restore_backend::start(const std::vector<std::string>& mount_points) {
     state_ = restore_state::RUNNING;
   }
   running_.store(true);
-  worker_ = std::thread(&twrp_restore_backend::run, this, opened_);
+  worker_ = std::thread(&twrp_restore_backend::run, this);
   return true;
 }
 
-// Restore the selected backup using the directory captured at job start.
-void twrp_restore_backend::run(std::string path) {
+// GUIAction::nandroid("restore")
+void twrp_restore_backend::run() {
   operation_start("Nandroid");
   int ret = 0;
 
-  ret = PartitionManager.RunRestore(path) ? 0 : 1;
+  std::string Restore_Name;
+  DataManager::GetValue("tw_restore", Restore_Name);
+  ret = PartitionManager.RunRestore(Restore_Name) ? 0 : 1;
   operation_end(ret);
 
   {

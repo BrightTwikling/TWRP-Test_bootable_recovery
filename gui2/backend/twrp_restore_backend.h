@@ -30,14 +30,15 @@ class twrp_restore_backend final : public restore_backend {
   void acknowledge() override;
 
  private:
-  void run(std::string path);
+  void run();
   void join_finished_thread();
 
   std::mutex mutex_;
   restore_state state_ = restore_state::IDLE;
   std::atomic<bool> running_{ false };
   std::thread worker_;
-  // Selected backup directory, copied into the worker when restore starts.
+  // Everything below open() describes this folder, the way the legacy pages
+  // describe whatever tw_restore points at.
   std::string opened_;
 };
 
