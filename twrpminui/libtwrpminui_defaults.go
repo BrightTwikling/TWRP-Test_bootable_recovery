@@ -140,7 +140,6 @@ func globalSharedLibs(ctx android.BaseContext) []string {
 
 	if getMakeBool(ctx, "TW_SUPPORT_INPUT_AIDL_HAPTICS") {
 		sharedLibs = append(sharedLibs, "android.hardware.vibrator-V2-ndk")
-		sharedLibs = append(sharedLibs, "android.hardware.vibrator-V2-cpp")
 	}
 
 	if getMakeBool(ctx, "TW_INCLUDE_JPEG") {
