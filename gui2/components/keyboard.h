@@ -1,6 +1,10 @@
 #ifndef GUI2_COMPONENTS_KEYBOARD_H
 #define GUI2_COMPONENTS_KEYBOARD_H
 
+#ifndef TW_DEFAULT_KEEP_NAVIGATION_VISIBLE
+#define TW_DEFAULT_KEEP_NAVIGATION_VISIBLE 0
+#endif
+
 #include <string>
 #include <vector>
 
