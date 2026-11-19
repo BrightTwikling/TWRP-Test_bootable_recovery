@@ -156,12 +156,12 @@ prebuilt_bin {
 // Boot Hal end
 
 // TW_INCLUDE_LPDUMP start
-prebuilt_bin {
-    name: "lpdump.recovery",
-    src: ":lpdump",
-    filename: "lpdump",
-    recovery: true,
-}
+//prebuilt_bin {
+//    name: "lpdump.recovery",
+//    src: ":lpdump",
+//    filename: "lpdump",
+//    recovery: true,
+//}
 
 cc_prebuilt_library {
     name: "liblpdump_interface-cpp.recovery",
@@ -176,16 +176,16 @@ cc_prebuilt_library {
     recovery: true
 }
 
-prebuilt_bin {
-    name: "lpdumpd.recovery",
-    src: ":lpdumpd",
-    filename: "lpdumpd",
-    required: [
-        "liblpdump_interface-cpp.recovery",
-        "libprotobuf-cpp-full.recovery",
-    ],
-    recovery: true,
-}
+//prebuilt_bin {
+//    name: "lpdumpd.recovery",
+//    src: ":lpdumpd",
+//    filename: "lpdumpd",
+//    required: [
+//       "liblpdump_interface-cpp.recovery",
+//       "libprotobuf-cpp-full.recovery",
+//    ],
+//    recovery: true,
+//}
 
 prebuilt_bin {
     name: "bootctl.recovery",
