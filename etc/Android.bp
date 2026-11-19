@@ -130,29 +130,29 @@ prebuilt_bin {
 }
 
 // Boot Hal start
-prebuilt_bin {
-    name: "android.hardware.boot@1.0-service.recovery",
-    src: ":android.hardware.boot@1.0-service",
-    init_rc: ["init/android.hardware.boot@1.0-service.rc"],
-    filename: "android.hardware.boot@1.0-service",
-    recovery: true,
-}
+//prebuilt_bin {
+//    name: "android.hardware.boot@1.0-service.recovery",
+//    src: ":android.hardware.boot@1.0-service",
+//    init_rc: ["init/android.hardware.boot@1.0-service.rc"],
+//    filename: "android.hardware.boot@1.0-service",
+//    recovery: true,
+//}
 
-prebuilt_bin {
-    name: "android.hardware.boot@1.1-service.recovery",
-    src: ":android.hardware.boot@1.1-service",
-    init_rc: ["init/android.hardware.boot@1.1-service.rc"],
-    filename: "android.hardware.boot@1.1-service",
-    recovery: true,
-}
+//prebuilt_bin {
+//    name: "android.hardware.boot@1.1-service.recovery",
+//    src: ":android.hardware.boot@1.1-service",
+//    init_rc: ["init/android.hardware.boot@1.1-service.rc"],
+//    filename: "android.hardware.boot@1.1-service",
+//    recovery: true,
+//}
 
-prebuilt_bin {
-    name: "android.hardware.boot@1.2-service.recovery",
-    src: ":android.hardware.boot@1.2-service",
-    init_rc: ["init/android.hardware.boot@1.2-service.rc"],
-    filename: "android.hardware.boot@1.2-service",
-    recovery: true,
-}
+//prebuilt_bin {
+//    name: "android.hardware.boot@1.2-service.recovery",
+//    src: ":android.hardware.boot@1.2-service",
+//    init_rc: ["init/android.hardware.boot@1.2-service.rc"],
+//    filename: "android.hardware.boot@1.2-service",
+//    recovery: true,
+//}
 // Boot Hal end
 
 // TW_INCLUDE_LPDUMP start
@@ -187,12 +187,12 @@ cc_prebuilt_library {
 //    recovery: true,
 //}
 
-prebuilt_bin {
-    name: "bootctl.recovery",
-    src: ":bootctl",
-    filename: "bootctl",
-    recovery: true,
-}
+//prebuilt_bin {
+//    name: "bootctl.recovery",
+//    src: ":bootctl",
+//    filename: "bootctl",
+//    recovery: true,
+//}
 // TW_INCLUDE_LPDUMP end
 
 // TW_USE_DMCTL start
