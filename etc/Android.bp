@@ -120,14 +120,14 @@ prebuilt_bin {
 }
 
 // Healthd
-prebuilt_bin {
-    name: "android.hardware.health@2.1-service.recovery",
-    src: ":android.hardware.health@2.1-service",
-    init_rc: ["init/android.hardware.health@2.1-service.rc"],
-    filename: "android.hardware.health@2.1-service",
-    required: ["android.hardware.health@2.1-impl.recovery"],
-    recovery: true,
-}
+//prebuilt_bin {
+//    name: "android.hardware.health@2.1-service.recovery",
+//    src: ":android.hardware.health@2.1-service",
+//    init_rc: ["init/android.hardware.health@2.1-service.rc"],
+//    filename: "android.hardware.health@2.1-service",
+//    required: ["android.hardware.health@2.1-impl.recovery"],
+//    recovery: true,
+//}
 
 // Boot Hal start
 //prebuilt_bin {
