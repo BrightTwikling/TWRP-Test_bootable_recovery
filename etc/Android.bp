@@ -39,13 +39,13 @@ prebuilt_root {
     install_in_root: true,
 }
 
-prebuilt_root {
+prebuilt_etc {
     name: "plat_hwservice_contexts.recovery",
     src: ":plat_hwservice_contexts",
     filename: "plat_hwservice_contexts",
 
+    relative_install_path: "selinux",
     recovery: true,
-    install_in_root: true,
 }
 
 prebuilt_root {
