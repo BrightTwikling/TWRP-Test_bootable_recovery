@@ -92,6 +92,7 @@ cc_library_static {
 
 cc_library {
     name: "libblkid",
+    recovery_available: true,
     srcs: [
         "src/init.c",
         "src/cache.c",
@@ -203,5 +204,4 @@ cc_library {
     local_include_dirs: [
         "src",
     ],
-    recovery: true,
 }
