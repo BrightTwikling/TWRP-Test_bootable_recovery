@@ -20,6 +20,7 @@ libtwrpminui_defaults {
 
 cc_library_shared {
     name: "libtwrpminui",
+    recovery_available: true,
     defaults: ["libtwrpminui_defaults", "twrp_defaults", "twrp_cflags_defaults"],
     cflags: [
         "-DTWRES=\"/twres/\""
