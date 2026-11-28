@@ -287,86 +287,86 @@ phony {
     }),
 }
 
-// cc_library_shared {
-//     name: "librecovery_ui_ext",
-//     recovery: true,
-//     install_in_root: true,
-//     multilib: {
-//         lib32: {
-//             relative_install_path: "system/lib",
-//         },
-//         lib64: {
-//             relative_install_path: "system/lib64",
-//         },
-//     },
-//     shared_libs: [
-//         "libbase",
-//         "liblog",
-//         "librecovery_ui",
-//     ],
-//     // TARGET_RECOVERY_UI_LIB should be one of librecovery_ui_{default,wear,vr,ethernet} or a
-//     // device-specific module that defines make_device() and the exact RecoveryUI class for the
-//     // target. It defaults to librecovery_ui_default, which uses ScreenRecoveryUI.
-//     whole_static_libs: select(soong_config_variable("recovery", "target_recovery_ui_lib"), {
-//         any @ libs: libs,
-//         default: ["librecovery_ui_default"],
-//     }),
-// }
+cc_library_shared {
+    name: "librecovery_ui_ext",
+    recovery: true,
+    install_in_root: true,
+    multilib: {
+        lib32: {
+            relative_install_path: "system/lib",
+        },
+        lib64: {
+            relative_install_path: "system/lib64",
+        },
+    },
+    shared_libs: [
+        "libbase",
+        "liblog",
+        "librecovery_ui",
+    ],
+    // TARGET_RECOVERY_UI_LIB should be one of librecovery_ui_{default,wear,vr,ethernet} or a
+    // device-specific module that defines make_device() and the exact RecoveryUI class for the
+    // target. It defaults to librecovery_ui_default, which uses ScreenRecoveryUI.
+    whole_static_libs: select(soong_config_variable("recovery", "target_recovery_ui_lib"), {
+        any @ libs: libs,
+        default: ["librecovery_ui_default"],
+    }),
+}
 
-// prebuilt_res {
-//     name: "recovery-resources-common-mdpi",
-//     recovery: true,
-//     install_in_root: true,
-//     relative_install_path: "images",
-//     srcs: [
-//         "res-mdpi/images/*.png",
-//     ],
-//     no_full_install: true,
-// }
+prebuilt_res {
+     name: "recovery-resources-common-mdpi",
+     recovery: true,
+     install_in_root: true,
+     relative_install_path: "images",
+     srcs: [
+         "res-mdpi/images/*.png",
+     ],
+     no_full_install: true,
+}
 
-// prebuilt_res {
-//     name: "recovery-resources-common-hdpi",
-//     recovery: true,
-//     install_in_root: true,
-//     relative_install_path: "images",
-//     srcs: [
-//         "res-hdpi/images/*.png",
-//     ],
-//     no_full_install: true,
-// }
+prebuilt_res {
+     name: "recovery-resources-common-hdpi",
+     recovery: true,
+     install_in_root: true,
+     relative_install_path: "images",
+     srcs: [
+         "res-hdpi/images/*.png",
+     ],
+     no_full_install: true,
+}
 
-// prebuilt_res {
-//     name: "recovery-resources-common-xhdpi",
-//     recovery: true,
-//     install_in_root: true,
-//     relative_install_path: "images",
-//     srcs: [
-//         "res-xhdpi/images/*.png",
-//     ],
-//     no_full_install: true,
-// }
+prebuilt_res {
+    name: "recovery-resources-common-xhdpi",
+    recovery: true,
+    install_in_root: true,
+    relative_install_path: "images",
+    srcs: [
+        "res-xhdpi/images/*.png",
+    ],
+    no_full_install: true,
+}
 
-// prebuilt_res {
-//     name: "recovery-resources-common-xxhdpi",
-//     recovery: true,
-//     install_in_root: true,
-//     relative_install_path: "images",
-//     srcs: [
-//         "res-xxhdpi/images/*.png",
-//     ],
-//     no_full_install: true,
-// }
+prebuilt_res {
+    name: "recovery-resources-common-xxhdpi",
+    recovery: true,
+    install_in_root: true,
+    relative_install_path: "images",
+    srcs: [
+        "res-xxhdpi/images/*.png",
+    ],
+    no_full_install: true,
+}
 
-// prebuilt_res {
-//     name: "recovery-resources-common-xxxhdpi",
-//     recovery: true,
-//     install_in_root: true,
-//     relative_install_path: "images",
-//     srcs: [
-//         "res-xxxhdpi/images/*.png",
-//     ],
-//     no_full_install: true,
-// }
+prebuilt_res {
+    name: "recovery-resources-common-xxxhdpi",
+    recovery: true,
+    install_in_root: true,
+    relative_install_path: "images",
+    srcs: [
+        "res-xxxhdpi/images/*.png",
+    ],
+    no_full_install: true,
+}
 
 cc_library_static {
     name: "libmounts",
@@ -555,9 +555,6 @@ cc_binary {
     }),
 
     shared_libs: [
-        "android.hardware.boot@1.0",
-        "android.hardware.boot@1.1",
-        "android.hardware.boot@1.2",
         "android.hardware.health@2.0",
         "android.hardware.health@2.1",
         "android.hardware.health-V4-ndk",
@@ -644,13 +641,9 @@ cc_binary {
         "recovery_deps",
         "hwservicemanager.recovery",
         "vndservicemanager.recovery",
-        "relink_libraries",
-        "relink_binaries",
-        "relink_vendor_hw_binaries",
         "bc",
         "mke2fs.conf",
         "pigz",
-        "twrp",
         "fsck.fat",
         "fatlabel",
         "mkfs.fat",
@@ -683,9 +676,7 @@ cc_binary {
         true: [
             "libhardware",
             "update_engine_sideload",
-            "android.hardware.boot@1.0-service.recovery",
-            "android.hardware.boot@1.1-service.recovery",
-            "android.hardware.boot@1.2-service.recovery",
+            "android.hardware.boot-service.qti.recovery",
         ],
         default: [],
     }) + select(soong_config_variable("twrpGlobalVars", "include_lpdump"), {
@@ -711,7 +702,6 @@ cc_binary {
             "vold_prepare_subdirs",
             "task_profiles.json.recovery",
             "fscryptpolicyget.recovery",
-            "keystore_auth",
             "keystore2.recovery",
             "plat_keystore2_key_contexts.recovery",
         ],
@@ -789,7 +779,6 @@ cc_binary {
     }) + select(soong_config_variable("twrpGlobalVars", "include_logcat"), {
         true: [
             "logcat",
-            "event-log-tags"
         ],
         default: [],
     }) + select(soong_config_variable("twrpGlobalVars", "use_logd"), {
@@ -813,14 +802,8 @@ cc_binary {
     }) + select(soong_config_variable("recovery", "target_userimages_use_f2fs"), {
         true: [
             "sload_f2fs",
-            "fs_mgr",
             "liblz4",
             "libinit"
-        ],
-        default: [],
-    }) + select(soong_config_variable("twrpGlobalVars", "include_python"), {
-        true: [
-            "python3_twrp"
         ],
         default: [],
     }),
